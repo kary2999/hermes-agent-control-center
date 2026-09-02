@@ -1,0 +1,11 @@
+.DS_Store
+.env
+*.key
+*.pem
+*.crt
+*.p12
+secrets/
+data/
+results/
+dist/
+*.log
