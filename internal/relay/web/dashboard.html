@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Agent 控制中心</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 16px; background: #f5f5f7; color: #1d1d1f; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .meta { color: #666; font-size: 12px; margin-bottom: 16px; }
+  .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #eee; }
+  section { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { color: #888; font-weight: 500; }
+  .progress { width: 100px; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .progress > i { display: block; height: 100%; background: #34c759; }
+  .running { color: #34c759; font-weight: 600; }
+  .empty { color: #999; font-size: 13px; padding: 8px 0; }
+  .error { color: #d70015; font-size: 13px; margin-bottom: 12px; }
+  code { background: #f0f0f0; padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>Hermes Agent 控制中心</h1>
+  <div class="meta" id="meta">尚未加载</div>
+  <div class="toolbar">
+    <button id="refresh-btn">手动刷新</button>
+    <span id="status"></span>
+  </div>
+  <div id="error" class="error" style="display:none"></div>
+
+  <section>
+    <h2>Agent / 负责人</h2>
+    <table>
+      <thead><tr><th>负责人</th><th>未完成</th><th>执行中</th></tr></thead>
+      <tbody id="agents-body"></tbody>
+    </table>
+    <div id="agents-empty" class="empty" style="display:none">暂无未完成任务</div>
+  </section>
+
+  <section>
+    <h2>执行中 / 未完成任务</h2>
+    <table>
+      <thead><tr><th>标题</th><th>负责人</th><th>状态</th><th>阶段与进度</th></tr></thead>
+      <tbody id="active-body"></tbody>
+    </table>
+    <div id="active-empty" class="empty" style="display:none">暂无进行中或未完成任务</div>
+  </section>
+
+  <section>
+    <h2>最近完成任务</h2>
+    <table>
+      <thead><tr><th>标题</th><th>负责人</th><th>完成时间</th></tr></thead>
+      <tbody id="completed-body"></tbody>
+    </table>
+    <div id="completed-empty" class="empty" style="display:none">暂无最近完成任务</div>
+  </section>
+
+<script>
+(function () {
+  var TOKEN_KEY = 'hermes_relay_token';
+  var token = sessionStorage.getItem(TOKEN_KEY);
+
+  function ensureToken() {
+    if (!token) {
+      var input = window.prompt('请输入访问令牌 (Token)：');
+      if (input) {
+        token = input.trim();
+        sessionStorage.setItem(TOKEN_KEY, token);
+      }
+    }
+    return token;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function escapeHTML(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function showError(msg) {
+    var el = document.getElementById('error');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  function renderAgents(agents) {
+    var body = document.getElementById('agents-body');
+    body.innerHTML = '';
+    document.getElementById('agents-empty').style.display = agents.length ? 'none' : 'block';
+    agents.forEach(function (a) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + escapeHTML(a.assignee) + '</td>' +
+        '<td>' + a.unfinished_count + '</td>' +
+        '<td>' + a.running_count + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
+  function renderActive(tasks) {
+    var body = document.getElementById('active-body');
+    body.innerHTML = '';
+    document.getElementById('active-empty').style.display = tasks.length ? 'none' : 'block';
+    tasks.forEach(function (t) {
+      var tr = document.createElement('tr');
+      var statusCls = t.is_running ? 'running' : '';
+      tr.innerHTML = '<td>' + escapeHTML(t.title || t.id) + '</td>' +
+        '<td>' + escapeHTML(t.assignee || '未分配') + '</td>' +
+        '<td class="' + statusCls + '">' + escapeHTML(t.status) + '</td>' +
+        '<td><span class="progress"><i style="width:' + t.progress_percent + '%"></i></span>' +
+        escapeHTML(t.stage) + ' (' + t.progress_percent + '%)</td>';
+      body.appendChild(tr);
+    });
+  }
+
+  function renderCompleted(tasks) {
+    var body = document.getElementById('completed-body');
+    body.innerHTML = '';
+    document.getElementById('completed-empty').style.display = tasks.length ? 'none' : 'block';
+    tasks.forEach(function (t) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + escapeHTML(t.title || t.id) + '</td>' +
+        '<td>' + escapeHTML(t.assignee || '未分配') + '</td>' +
+        '<td>' + fmtTime(t.completed_at) + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
+  function render(data) {
+    var meta = document.getElementById('meta');
+    if (!data.has_snapshot) {
+      meta.textContent = '尚未收到 Connector 快照';
+      renderAgents([]);
+      renderActive([]);
+      renderCompleted([]);
+      return;
+    }
+    meta.textContent = '设备: ' + (data.device_id || '-') +
+      ' · 采集时间: ' + fmtTime(data.snapshot_taken_at) +
+      ' · 接收时间: ' + fmtTime(data.snapshot_received_at) +
+      ' · 刷新时间: ' + fmtTime(data.generated_at);
+    renderAgents(data.agents || []);
+    renderActive(data.active_tasks || []);
+    renderCompleted(data.recent_completed || []);
+  }
+
+  function load() {
+    if (!ensureToken()) {
+      showError('需要访问令牌才能加载数据');
+      return;
+    }
+    document.getElementById('status').textContent = '加载中…';
+    fetch('/api/v1/dashboard', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (res) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          token = null;
+          throw new Error('令牌无效，请刷新页面后重新输入');
+        }
+        if (!res.ok) {
+          throw new Error('请求失败: HTTP ' + res.status);
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        showError('');
+        document.getElementById('status').textContent = '已更新';
+        render(data);
+      })
+      .catch(function (err) {
+        showError(err.message);
+        document.getElementById('status').textContent = '';
+      });
+  }
+
+  document.getElementById('refresh-btn').addEventListener('click', load);
+  load();
+  setInterval(load, 5000);
+})();
+</script>
+</body>
+</html>

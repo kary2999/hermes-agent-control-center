@@ -1,0 +1,17 @@
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - gosimple
+    - gofmt
+
+issues:
+  exclude-dirs:
+    - internal/web/assets

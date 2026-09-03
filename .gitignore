@@ -8,4 +8,7 @@ secrets/
 data/
 results/
 dist/
+.tmp/
+/connector
+/relay
 *.log
