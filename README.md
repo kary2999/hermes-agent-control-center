@@ -1,39 +1,59 @@
 ---
 title: Hermes Agent Control Center
 ---
-<!-- [skill: go-team-standards · 技术方案] Hermes Agent 控制中心项目入口 -->
+<!-- [skill: go-team-standards · 技术方案] Hermes Agent 控制中心 MVP 项目入口 -->
 
 # Hermes Agent Control Center
 
-面向个人使用的低依赖 Hermes Agent 管理工作台，用于在 Lark 中查看 Agent 状态、任务进度、近期完成及图片或外部链接形式的交付结果。
+面向个人使用的极简 Hermes Agent 查看面板。Mac Connector 读取本机 Hermes 任务状态并定时上传，Relay 在内存中保存最新快照并提供简体中文网页。
 
-## 项目状态
+## 当前状态
 
-当前处于方案设计阶段，尚未开始正式功能开发。
+MVP 已完成并通过本地真实链路验证。
 
-## 设计目标
+## 已实现
 
-- Mac mini Connector 主动连接中转服务器，不暴露家庭公网端口。
-- CentOS Server 以单一静态二进制运行，无需 Docker、Node.js、数据库或 Redis。
-- 使用 WSS、AES-256-GCM、消息序号和 nonce 保护通信。
-- 使用增量事件、按阈值压缩、观察租约和自适应频率降低流量。
-- Lark Web App 通过 REST 获取快照、通过 SSE 实时更新。
-- UI 使用已经确认的简体中文极简风格。
+- 查看 Agent/执行者及未完成任务数量。
+- 查看执行中、等待中和最近完成的任务。
+- 显示任务状态、阶段和粗粒度进度。
+- 页面手动刷新及每 5 秒自动刷新。
+- Connector 只读访问 Hermes `kanban.db`，不读取 Prompt、消息正文、Token 或密钥。
+- Connector 使用 HTTP POST 上传快照，Relay 仅在内存中保留最新快照。
+- 共享令牌从环境变量读取，不写入仓库或日志。
+- Relay 内嵌网页，无需 Node.js、Docker、数据库或 Redis。
 
-## 交付物
+## 构建
 
-- `hermes-connector`：macOS arm64 客户端。
-- `hermes-relay`：CentOS/Linux amd64 中转服务。
-- 内嵌式 Lark Web UI。
-- systemd、launchd 安装与升级脚本。
-- 双端源代码、测试、协议和部署文档。
+```bash
+go build -o dist/hermes-connector ./cmd/connector
+go build -o dist/hermes-relay ./cmd/relay
+```
 
-## 开发路线
+## 启动 Relay
 
-完整架构、协议、安全设计、分阶段任务和验收标准见：
+```bash
+export HERMES_RELAY_LISTEN_ADDR=":8080"
+export HERMES_RELAY_TOKEN="<本地生成的高熵令牌>"
+./dist/hermes-relay
+```
 
-- [开发方案](docs/development-plan.md)
+## 启动 Connector
+
+```bash
+export HERMES_DEVICE_ID="mac-mini"
+export HERMES_RELAY_URL="https://你的中转服务器域名"
+export HERMES_RELAY_TOKEN="<与 Relay 相同的令牌>"
+export HERMES_KANBAN_DB="$HOME/.hermes/kanban.db"
+export HERMES_POLL_INTERVAL="10s"
+./dist/hermes-connector
+```
+
+浏览器访问 Relay 根地址。页面首次打开时输入同一共享令牌；令牌只保存在当前浏览器本地存储中。
+
+## MVP 边界
+
+当前版本不包含 Docker、远程控制、图片上传、事件历史、多用户权限、数据库持久化和复杂同步协议。后续仅在实际需要时扩展。
 
 ## 安全
 
-仓库不得提交真实密钥、Token、服务器地址、生产日志、用户数据或 Hermes prompt。密钥仅在部署阶段本地生成，并分别保存到 macOS Keychain 与服务器受限目录。
+不要将真实密钥、Token、服务器凭证、用户数据、日志或 Hermes Prompt 提交到 Git。
