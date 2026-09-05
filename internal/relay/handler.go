@@ -34,32 +34,36 @@ const gateContentSecurityPolicy = "default-src 'none'; script-src 'unsafe-inline
 
 // Handler serves the Relay's HTTP API and embedded pages.
 type Handler struct {
-	store       *SnapshotStore
-	token       string
-	redirectURL string
-	sessionKey  []byte
-	gatePage    []byte
-	logger      *slog.Logger
-	now         func() time.Time
+	store          *SnapshotStore
+	token          string
+	dashboardToken string
+	redirectURL    string
+	sessionKey     []byte
+	gatePage       []byte
+	logger         *slog.Logger
+	now            func() time.Time
 }
 
 // NewHandler constructs a Handler backed by store, authenticating
-// Connector/session requests against token and sending unauthenticated or
-// failed-verification browser requests to redirectURL. It returns an error
-// if the embedded gate page template fails to render.
-func NewHandler(store *SnapshotStore, token, redirectURL string, logger *slog.Logger) (*Handler, error) {
+// Connector/snapshot requests against token, additionally accepting
+// dashboardToken (which may be empty to disable it) for browser session
+// exchange only, and sending unauthenticated or failed-verification browser
+// requests to redirectURL. It returns an error if the embedded gate page
+// template fails to render.
+func NewHandler(store *SnapshotStore, token, dashboardToken, redirectURL string, logger *slog.Logger) (*Handler, error) {
 	gatePage, err := renderGatePage(redirectURL)
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
 	}
 	return &Handler{
-		store:       store,
-		token:       token,
-		redirectURL: redirectURL,
-		sessionKey:  deriveSessionKey(token),
-		gatePage:    gatePage,
-		logger:      logger,
-		now:         time.Now,
+		store:          store,
+		token:          token,
+		dashboardToken: dashboardToken,
+		redirectURL:    redirectURL,
+		sessionKey:     deriveSessionKey(token),
+		gatePage:       gatePage,
+		logger:         logger,
+		now:            time.Now,
 	}, nil
 }
 
@@ -155,14 +159,38 @@ func (h *Handler) hasValidSession(r *http.Request) bool {
 	return verifySessionValue(h.sessionKey, cookie.Value, h.now())
 }
 
+// isAuthorized 只认共享 Relay token，用于 POST /api/v1/snapshot 等写操作
+// 和 dashboard 只读 API 的 Bearer 分支；Dashboard token 绝不能通过
+// 这条路径获得授权，否则一旦泄漏就等同于拿到了写权限。
 func (h *Handler) isAuthorized(r *http.Request) bool {
+	return matchesBearer(r, h.token)
+}
+
+// isSessionExchangeAuthorized 仅供 POST /api/v1/session 使用：除共享
+// Relay token 外，还接受专用的 Dashboard token 换取会话 Cookie。
+// Dashboard token 的唯一用途就是这里；它不会被 isAuthorized 接受，
+// 因此永远不能用来直接调用 POST /api/v1/snapshot 或其他 Bearer 保护
+// 的 API。
+func (h *Handler) isSessionExchangeAuthorized(r *http.Request) bool {
+	if h.isAuthorized(r) {
+		return true
+	}
+	// 空字符串表示未配置 Dashboard token；不能让它匹配到同样为空的
+	// Authorization header，否则未配置时反而放行了空 Bearer。
+	if h.dashboardToken == "" {
+		return false
+	}
+	return matchesBearer(r, h.dashboardToken)
+}
+
+func matchesBearer(r *http.Request, want string) bool {
 	const prefix = "Bearer "
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, prefix) {
 		return false
 	}
 	got := strings.TrimPrefix(auth, prefix)
-	return subtle.ConstantTimeCompare([]byte(got), []byte(h.token)) == 1
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // handleGate serves the generic, unauthenticated entry page. It never
@@ -185,12 +213,12 @@ func (h *Handler) handleGate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePostSession exchanges a valid shared Bearer token for a time-limited
-// session cookie. The cookie value is an HMAC-signed expiry, never the
-// shared token itself, so a leaked cookie cannot be replayed as the
-// Connector credential.
+// handlePostSession exchanges a valid shared Relay token or dashboard token
+// for a time-limited session cookie. The cookie value is an HMAC-signed
+// expiry, never the presented token itself, so a leaked cookie cannot be
+// replayed as either credential.
 func (h *Handler) handlePostSession(w http.ResponseWriter, r *http.Request) {
-	if !h.isAuthorized(r) {
+	if !h.isSessionExchangeAuthorized(r) {
 		h.rejectUnauthorized(w, r)
 		return
 	}

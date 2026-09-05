@@ -14,13 +14,25 @@ import (
 )
 
 const (
-	testToken       = "shared-secret-token"
-	testRedirectURL = "https://example.com"
+	testToken          = "shared-secret-token"
+	testDashboardToken = "dashboard-only-token"
+	testRedirectURL    = "https://example.com"
 )
 
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
-	h, err := NewHandler(NewSnapshotStore(), testToken, testRedirectURL, testLogger())
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, testLogger())
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	return h
+}
+
+// newTestHandlerWithoutDashboardToken 模拟未配置 HERMES_DASHBOARD_TOKEN
+// 的既有部署，确保这条 Lark 直达链路完全可选、向后兼容。
+func newTestHandlerWithoutDashboardToken(t *testing.T) *Handler {
+	t.Helper()
+	h, err := NewHandler(NewSnapshotStore(), testToken, "", testRedirectURL, testLogger())
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -478,7 +490,7 @@ func (f *failingResponseWriter) WriteHeader(int) {}
 func TestHandleGateWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	h, err := NewHandler(NewSnapshotStore(), testToken, testRedirectURL, logger)
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -502,7 +514,7 @@ func TestHandleGateWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 func TestHandleDashboardPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	h, err := NewHandler(NewSnapshotStore(), testToken, testRedirectURL, logger)
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -525,7 +537,7 @@ func TestHandleDashboardPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 
 func newTestHandlerWithToken(t *testing.T, token string) *Handler {
 	t.Helper()
-	h, err := NewHandler(NewSnapshotStore(), token, testRedirectURL, testLogger())
+	h, err := NewHandler(NewSnapshotStore(), token, testDashboardToken, testRedirectURL, testLogger())
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}

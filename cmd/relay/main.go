@@ -21,8 +21,12 @@ const (
 
 func loadConfig() (relay.Config, error) {
 	cfg := relay.Config{
-		ListenAddr:              os.Getenv("HERMES_RELAY_LISTEN_ADDR"),
-		Token:                   os.Getenv("HERMES_RELAY_TOKEN"),
+		ListenAddr: os.Getenv("HERMES_RELAY_LISTEN_ADDR"),
+		Token:      os.Getenv("HERMES_RELAY_TOKEN"),
+		// HERMES_DASHBOARD_TOKEN 是可选的：Lark 首页把它放在直达
+		// 链接的 URL fragment 中传递，未配置时留空即可，网关页面的
+		// 手动输入兜底流程仍然只用 HERMES_RELAY_TOKEN。
+		DashboardToken:          os.Getenv("HERMES_DASHBOARD_TOKEN"),
 		DataDir:                 defaultDataDir,
 		ReadTimeout:             defaultReadTimeout,
 		WriteTimeout:            defaultWriteTimeout,
