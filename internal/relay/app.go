@@ -53,6 +53,13 @@ type Config struct {
 	// dashboard API request. It must come from the environment; it is
 	// never logged.
 	Token string
+	// DashboardToken is an optional, separate bearer token accepted only by
+	// POST /api/v1/session for the Lark direct-open flow. It must come from
+	// the environment, is never logged, and — unlike Token — must never
+	// authorize POST /api/v1/snapshot. Leaving it empty disables the
+	// direct-open flow; the gate page's manual-prompt fallback (Token) still
+	// works.
+	DashboardToken string
 	// DataDir is the directory the Relay uses for persistent storage.
 	DataDir string
 	// ReadTimeout bounds how long reading a request may take.
@@ -124,7 +131,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("relay: invalid config: %w", err)
 	}
 	store := NewSnapshotStore()
-	handler, err := NewHandler(store, cfg.Token, cfg.UnauthorizedRedirectURL, logger)
+	handler, err := NewHandler(store, cfg.Token, cfg.DashboardToken, cfg.UnauthorizedRedirectURL, logger)
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
 	}

@@ -10,9 +10,40 @@
 <script>
 (function () {
   var REDIRECT_URL = "{{.RedirectURL}}";
+  // 只接受形似 token 的字符集/长度，纯粹是提前过滤明显错误的
+  // fragment，不代表安全校验——真正的校验只在服务端做。
+  var TOKEN_PATTERN = /^[A-Za-z0-9._-]{8,512}$/;
 
   function redirectAway() {
     window.location.replace(REDIRECT_URL);
+  }
+
+  function exchangeToken(token) {
+    fetch('/api/v1/session', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function (res) {
+      if (!res.ok) {
+        redirectAway();
+        return;
+      }
+      window.location.replace('/dashboard');
+    }).catch(function () {
+      redirectAway();
+    });
+  }
+
+  // Lark 首页把 dashboard token 放进 URL fragment（#access_token=...），
+  // 因为浏览器永远不会把 fragment 发给服务器，nginx 访问日志也就不
+  // 可能记录到它。读取后立刻用 history.replaceState 清掉 fragment，
+  // 避免 token 留在地址栏、浏览器历史，或被同页面里的其它脚本读到。
+  var hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  var fragmentToken = hashParams.get('access_token');
+
+  if (fragmentToken && TOKEN_PATTERN.test(fragmentToken)) {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    exchangeToken(fragmentToken);
+    return;
   }
 
   var token = window.prompt('Enter access code:');
@@ -20,19 +51,7 @@
     redirectAway();
     return;
   }
-
-  fetch('/api/v1/session', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token.trim() }
-  }).then(function (res) {
-    if (!res.ok) {
-      redirectAway();
-      return;
-    }
-    window.location.replace('/dashboard');
-  }).catch(function () {
-    redirectAway();
-  });
+  exchangeToken(token.trim());
 })();
 </script>
 </body>
