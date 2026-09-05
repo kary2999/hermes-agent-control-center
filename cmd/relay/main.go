@@ -21,11 +21,12 @@ const (
 
 func loadConfig() (relay.Config, error) {
 	cfg := relay.Config{
-		ListenAddr:   os.Getenv("HERMES_RELAY_LISTEN_ADDR"),
-		Token:        os.Getenv("HERMES_RELAY_TOKEN"),
-		DataDir:      defaultDataDir,
-		ReadTimeout:  defaultReadTimeout,
-		WriteTimeout: defaultWriteTimeout,
+		ListenAddr:              os.Getenv("HERMES_RELAY_LISTEN_ADDR"),
+		Token:                   os.Getenv("HERMES_RELAY_TOKEN"),
+		DataDir:                 defaultDataDir,
+		ReadTimeout:             defaultReadTimeout,
+		WriteTimeout:            defaultWriteTimeout,
+		UnauthorizedRedirectURL: os.Getenv("HERMES_UNAUTHORIZED_REDIRECT_URL"),
 	}
 
 	if raw := os.Getenv("HERMES_RELAY_DATA_DIR"); raw != "" {

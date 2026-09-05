@@ -10,6 +10,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
 	t.Setenv("HERMES_RELAY_READ_TIMEOUT", "20s")
 	t.Setenv("HERMES_RELAY_WRITE_TIMEOUT", "25s")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -27,6 +28,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	if cfg.WriteTimeout != 25*time.Second {
 		t.Errorf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 25*time.Second)
 	}
+	if cfg.UnauthorizedRedirectURL != "https://example.com" {
+		t.Errorf("UnauthorizedRedirectURL = %q, want %q", cfg.UnauthorizedRedirectURL, "https://example.com")
+	}
 }
 
 func TestLoadConfigDefaultsTimeouts(t *testing.T) {
@@ -34,6 +38,7 @@ func TestLoadConfigDefaultsTimeouts(t *testing.T) {
 	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
 	t.Setenv("HERMES_RELAY_READ_TIMEOUT", "")
 	t.Setenv("HERMES_RELAY_WRITE_TIMEOUT", "")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -50,6 +55,7 @@ func TestLoadConfigDefaultsTimeouts(t *testing.T) {
 func TestLoadConfigMissingListenAddrFails(t *testing.T) {
 	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "")
 	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
 
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("loadConfig() with missing listen addr: expected error, got nil")
@@ -59,6 +65,7 @@ func TestLoadConfigMissingListenAddrFails(t *testing.T) {
 func TestLoadConfigMissingTokenFails(t *testing.T) {
 	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
 	t.Setenv("HERMES_RELAY_TOKEN", "")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
 
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("loadConfig() with missing token: expected error, got nil")
@@ -69,8 +76,29 @@ func TestLoadConfigInvalidReadTimeoutFails(t *testing.T) {
 	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
 	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
 	t.Setenv("HERMES_RELAY_READ_TIMEOUT", "not-a-duration")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
 
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("loadConfig() with invalid read timeout: expected error, got nil")
+	}
+}
+
+func TestLoadConfigMissingRedirectURLFails(t *testing.T) {
+	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() with missing redirect url: expected error, got nil")
+	}
+}
+
+func TestLoadConfigInvalidRedirectURLSchemeFails(t *testing.T) {
+	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "javascript:alert(1)")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() with disallowed redirect url scheme: expected error, got nil")
 	}
 }
