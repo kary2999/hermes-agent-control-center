@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,70 @@ func TestHandleGateServesGenericPage(t *testing.T) {
 		if strings.Contains(lower, strings.ToLower(word)) {
 			t.Errorf("unauthenticated gate page body leaks identifying term %q:\n%s", word, body)
 		}
+	}
+}
+
+// cspDirective 从 Content-Security-Policy 头部值中提取指定 directive
+// 对应的、以空格分隔的来源列表（例如 "frame-ancestors 'none'" ->
+// ["'none'"]）。若 directive 不存在则直接判失败，避免 directive
+// 名称拼写错误时静默通过。
+func cspDirective(t *testing.T, csp, directive string) []string {
+	t.Helper()
+	for part := range strings.SplitSeq(csp, ";") {
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		if fields[0] == directive {
+			return fields[1:]
+		}
+	}
+	t.Fatalf("CSP %q missing directive %q", csp, directive)
+	return nil
+}
+
+// TestGateContentSecurityPolicyFrameAncestors 依据官方 Lark/飞书
+// AppLink 文档，将 frame-ancestors 严格限定为 Lark 国际版
+// （larksuite.com）和飞书中国版（feishu.cn）的 AppLink 来源。gate
+// 页面嵌在 Lark/飞书应用内浏览器 frame 中，因此不能维持 'none'，
+// 但也不能对其他任何来源开放。
+func TestGateContentSecurityPolicyFrameAncestors(t *testing.T) {
+	got := cspDirective(t, gateContentSecurityPolicy, "frame-ancestors")
+	want := []string{"https://*.larksuite.com", "https://*.feishu.cn"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("frame-ancestors sources = %v, want %v", got, want)
+	}
+}
+
+func TestGateContentSecurityPolicyFrameAncestorsSources(t *testing.T) {
+	sources := cspDirective(t, gateContentSecurityPolicy, "frame-ancestors")
+	present := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		present[s] = true
+	}
+
+	cases := []struct {
+		name    string
+		source  string
+		allowed bool
+	}{
+		{name: "Lark international AppLink origin (larksuite.com)", source: "https://*.larksuite.com", allowed: true},
+		{name: "Feishu China AppLink origin (feishu.cn)", source: "https://*.feishu.cn", allowed: true},
+		{name: "frame-ancestors 'none' must not be present", source: "'none'", allowed: false},
+		{name: "all-origin wildcard '*' must not be present", source: "*", allowed: false},
+		{name: "unrelated origin must not be present", source: "https://example.com", allowed: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := present[tc.source]; got != tc.allowed {
+				t.Errorf("frame-ancestors contains %q = %v, want %v (sources: %v)", tc.source, got, tc.allowed, sources)
+			}
+		})
+	}
+
+	if len(sources) != 2 {
+		t.Errorf("frame-ancestors has %d source(s), want exactly 2 (no other origins allowed): %v", len(sources), sources)
 	}
 }
 
