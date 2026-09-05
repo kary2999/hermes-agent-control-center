@@ -44,10 +44,38 @@ type TaskRun struct {
 	Outcome           string     `json:"outcome,omitempty"`
 }
 
+// SessionSummary 逐字段镜像 Connector 的脱敏会话契约
+// （internal/connector.SessionSummary）。这里只存在非敏感字段的显式
+// 白名单；传入 JSON 中其余字段（user_id、chat_id、thread_id、
+// session_key、origin_json、system_prompt、cwd、git 路径/分支、
+// 计费 URL、活动描述、消息正文、工具参数/结果、prompt、推理内容、
+// 密钥、成本浮点数）由于本结构体没有对应字段接收，会被 json.Unmarshal
+// 静默丢弃。
+type SessionSummary struct {
+	ID               string     `json:"id"`
+	Title            string     `json:"title"`
+	Source           string     `json:"source"`
+	Model            string     `json:"model"`
+	ProfileName      string     `json:"profile_name"`
+	StartedAt        time.Time  `json:"started_at"`
+	EndedAt          *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt   *time.Time `json:"last_activity_at,omitempty"`
+	MessageCount     int        `json:"message_count"`
+	ToolCallCount    int        `json:"tool_call_count"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
+	CacheReadTokens  int64      `json:"cache_read_tokens"`
+	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	ReasoningTokens  int64      `json:"reasoning_tokens"`
+	Pinned           bool       `json:"pinned"`
+	Archived         bool       `json:"archived"`
+}
+
 type Snapshot struct {
-	TakenAt time.Time   `json:"taken_at"`
-	Tasks   []AgentTask `json:"tasks"`
-	Runs    []TaskRun   `json:"runs"`
+	TakenAt  time.Time        `json:"taken_at"`
+	Tasks    []AgentTask      `json:"tasks"`
+	Runs     []TaskRun        `json:"runs"`
+	Sessions []SessionSummary `json:"sessions"`
 }
 
 // SnapshotPayload is the request body decoded from POST /api/v1/snapshot.

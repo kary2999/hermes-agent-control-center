@@ -17,11 +17,12 @@ const defaultPollInterval = 10 * time.Second
 
 func loadConfig() (connector.Config, error) {
 	cfg := connector.Config{
-		DeviceID:     os.Getenv("HERMES_DEVICE_ID"),
-		RelayURL:     os.Getenv("HERMES_RELAY_URL"),
-		Token:        os.Getenv("HERMES_RELAY_TOKEN"),
-		KanbanDBPath: os.Getenv("HERMES_KANBAN_DB"),
-		PollInterval: defaultPollInterval,
+		DeviceID:          os.Getenv("HERMES_DEVICE_ID"),
+		RelayURL:          os.Getenv("HERMES_RELAY_URL"),
+		Token:             os.Getenv("HERMES_RELAY_TOKEN"),
+		KanbanDBPath:      os.Getenv("HERMES_KANBAN_DB"),
+		HermesStateDBPath: os.Getenv("HERMES_STATE_DB"),
+		PollInterval:      defaultPollInterval,
 	}
 
 	if raw := os.Getenv("HERMES_POLL_INTERVAL"); raw != "" {

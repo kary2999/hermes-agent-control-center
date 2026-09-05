@@ -47,6 +47,9 @@ type Config struct {
 	// KanbanDBPath optionally overrides the Hermes kanban.db path. When
 	// empty it is resolved via ResolveKanbanDBPath.
 	KanbanDBPath string
+	// HermesStateDBPath 可选地指向本地 Hermes state.db，用于采集脱敏后的
+	// 会话元数据。留空则禁用会话采集，保持既有的仅 Kanban 行为。
+	HermesStateDBPath string
 	// PollInterval is the cadence at which a fresh snapshot is collected
 	// and reported to the Relay server.
 	PollInterval time.Duration
@@ -120,9 +123,9 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		}
 		dbPath = resolved
 	}
-	collector, err := NewSQLiteCollector(dbPath)
+	collector, err := NewSQLiteCollectorWithStateDB(dbPath, cfg.HermesStateDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("connector: invalid kanban db path: %w", err)
+		return nil, fmt.Errorf("connector: invalid kanban or hermes state db path: %w", err)
 	}
 
 	return &App{
