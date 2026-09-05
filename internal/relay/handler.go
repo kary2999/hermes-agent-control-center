@@ -19,6 +19,9 @@ var gatePageTemplateSource string
 //go:embed web/dashboard.html
 var dashboardHTML []byte
 
+//go:embed web/demo_v2.html
+var demoV2HTML []byte
+
 // maxSnapshotBodyBytes bounds the size of an accepted POST /api/v1/snapshot
 // body, protecting the Relay from unbounded memory use on a malformed or
 // hostile request.
@@ -87,6 +90,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /", h.handleGate)
 	mux.HandleFunc("POST /api/v1/session", h.handlePostSession)
 	mux.HandleFunc("GET /dashboard", h.requireSession(h.handleDashboardPage))
+	mux.HandleFunc("GET /demo-v2", h.requireSession(h.handleDemoV2Page))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
 	mux.HandleFunc("POST /api/v1/snapshot", h.requireAuth(h.handlePostSnapshot))
 	return withNoStore(mux)
@@ -243,6 +247,19 @@ func (h *Handler) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(dashboardHTML); err != nil {
 		h.logger.Error("write dashboard page response failed", slog.String("error", err.Error()))
+	}
+}
+
+// handleDemoV2Page serves the UI-only demo mockup at GET /demo-v2. It is a
+// fully self-contained, static HTML/CSS/JS page built on mock data only: it
+// makes no network requests and never touches live Hermes data or write
+// paths. Reaching this handler already implies requireSession accepted a
+// valid cookie, matching the real dashboard's access boundary.
+func (h *Handler) handleDemoV2Page(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(demoV2HTML); err != nil {
+		h.logger.Error("write demo-v2 page response failed", slog.String("error", err.Error()))
 	}
 }
 

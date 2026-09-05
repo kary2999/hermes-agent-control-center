@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"net/url"
 	"path/filepath"
 	"reflect"
@@ -59,11 +60,38 @@ type TaskRun struct {
 	Outcome           string     `json:"outcome,omitempty"`
 }
 
-// Snapshot is a full point-in-time read of allowed Hermes kanban state.
+// SessionSummary 是单条 Hermes 会话的脱敏只读视图，数据来自可选配置的
+// 本地 Hermes state.db。字段全部来自显式的非敏感列白名单；任何可能携带
+// 用户/agent 内容或标识符的列——user_id、chat_id、thread_id、
+// session_key、origin_json、system_prompt、cwd、git 路径/分支、
+// 计费 URL、活动描述、消息正文、工具参数/结果、prompt、推理内容、
+// 密钥以及成本浮点数——都被有意排除在外。
+type SessionSummary struct {
+	ID               string     `json:"id"`
+	Title            string     `json:"title"`
+	Source           string     `json:"source"`
+	Model            string     `json:"model"`
+	ProfileName      string     `json:"profile_name"`
+	StartedAt        time.Time  `json:"started_at"`
+	EndedAt          *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt   *time.Time `json:"last_activity_at,omitempty"`
+	MessageCount     int        `json:"message_count"`
+	ToolCallCount    int        `json:"tool_call_count"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
+	CacheReadTokens  int64      `json:"cache_read_tokens"`
+	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	ReasoningTokens  int64      `json:"reasoning_tokens"`
+	Pinned           bool       `json:"pinned"`
+	Archived         bool       `json:"archived"`
+}
+
+// Snapshot 是 Hermes kanban 与会话状态在某一时间点的完整只读快照。
 type Snapshot struct {
-	TakenAt time.Time  `json:"taken_at"`
-	Tasks   []AgentTask `json:"tasks"`
-	Runs    []TaskRun   `json:"runs"`
+	TakenAt  time.Time        `json:"taken_at"`
+	Tasks    []AgentTask      `json:"tasks"`
+	Runs     []TaskRun        `json:"runs"`
+	Sessions []SessionSummary `json:"sessions"`
 }
 
 // ChangeKind identifies what kind of mutation a Change describes.
@@ -97,14 +125,31 @@ type Collector interface {
 // database using a read-only connection.
 type SQLiteCollector struct {
 	Path string
+	// StateDBPath 可选地指向本地 Hermes state.db，用于采集脱敏后的会话
+	// 元数据。留空则禁用会话采集，保持仅 Kanban 的既有行为，向后兼容。
+	StateDBPath string
 }
 
-// NewSQLiteCollector validates and stores a database path for later reads.
+// NewSQLiteCollector 校验并保存 Kanban 数据库路径，供后续读取使用。
+// 会话采集处于禁用状态；若还需采集脱敏会话元数据，请使用
+// NewSQLiteCollectorWithStateDB。
 func NewSQLiteCollector(path string) (*SQLiteCollector, error) {
+	return NewSQLiteCollectorWithStateDB(path, "")
+}
+
+// NewSQLiteCollectorWithStateDB 同时校验并保存 Kanban 数据库路径和可选的
+// Hermes state.db 路径。stateDBPath 为空时禁用会话采集，保持既有的
+// 仅 Kanban 行为。
+func NewSQLiteCollectorWithStateDB(path, stateDBPath string) (*SQLiteCollector, error) {
 	if err := validateSQLitePath(path); err != nil {
 		return nil, err
 	}
-	return &SQLiteCollector{Path: path}, nil
+	if strings.TrimSpace(stateDBPath) != "" {
+		if err := validateSQLitePath(stateDBPath); err != nil {
+			return nil, fmt.Errorf("invalid hermes state db path: %w", err)
+		}
+	}
+	return &SQLiteCollector{Path: path, StateDBPath: stateDBPath}, nil
 }
 
 func validateSQLitePath(path string) error {
@@ -150,7 +195,38 @@ func (c *SQLiteCollector) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{TakenAt: time.Now().UTC(), Tasks: tasks, Runs: runs}, nil
+
+	sessions, err := c.collectSessions(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	return Snapshot{TakenAt: time.Now().UTC(), Tasks: tasks, Runs: runs, Sessions: sessions}, nil
+}
+
+// collectSessions returns sanitized session metadata from StateDBPath, or an
+// empty slice with no error when StateDBPath is unset (session collection
+// disabled). A configured-but-unreadable state.db fails the whole call
+// rather than silently returning partial, misleading data.
+func (c *SQLiteCollector) collectSessions(ctx context.Context) ([]SessionSummary, error) {
+	if strings.TrimSpace(c.StateDBPath) == "" {
+		return []SessionSummary{}, nil
+	}
+	if err := validateSQLitePath(c.StateDBPath); err != nil {
+		return nil, fmt.Errorf("invalid hermes state db path: %w", err)
+	}
+
+	db, err := sql.Open("sqlite", readOnlyDSN(c.StateDBPath))
+	if err != nil {
+		return nil, fmt.Errorf("open hermes state database: %w", err)
+	}
+	defer db.Close()
+
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("ping hermes state database: %w", err)
+	}
+
+	return readSessions(ctx, db)
 }
 
 func readOnlyDSN(path string) string {
@@ -296,6 +372,112 @@ func readRuns(ctx context.Context, db *sql.DB) ([]TaskRun, error) {
 		return nil, fmt.Errorf("iterate task runs: %w", err)
 	}
 	return runs, nil
+}
+
+// maxSessions caps the number of sessions collected per snapshot, bounding
+// payload size regardless of how much session history Hermes retains.
+const maxSessions = 200
+
+// readSessions collects sanitized session metadata via an explicit column
+// allowlist (see SessionSummary), excluding hidden sessions, newest
+// activity/start first, capped at maxSessions.
+func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
+	const query = `
+		SELECT id, title, source, model, profile_name, started_at, ended_at, last_activity_at,
+			message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
+			cache_write_tokens, reasoning_tokens, pinned, archived
+		FROM sessions
+		WHERE hidden = 0
+		ORDER BY COALESCE(last_activity_at, started_at) DESC
+		LIMIT ?
+	`
+	rows, err := db.QueryContext(ctx, query, maxSessions)
+	if err != nil {
+		return nil, fmt.Errorf("query hermes sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := []SessionSummary{}
+	for rows.Next() {
+		var (
+			session                       SessionSummary
+			model, profileName            sql.NullString
+			startedAtUnix                 sql.NullFloat64
+			endedAtUnix, lastActivityUnix sql.NullFloat64
+			pinned, archived              int64
+		)
+		if err := rows.Scan(
+			&session.ID,
+			&session.Title,
+			&session.Source,
+			&model,
+			&profileName,
+			&startedAtUnix,
+			&endedAtUnix,
+			&lastActivityUnix,
+			&session.MessageCount,
+			&session.ToolCallCount,
+			&session.InputTokens,
+			&session.OutputTokens,
+			&session.CacheReadTokens,
+			&session.CacheWriteTokens,
+			&session.ReasoningTokens,
+			&pinned,
+			&archived,
+		); err != nil {
+			return nil, fmt.Errorf("scan hermes session row: %w", err)
+		}
+		session.Title = truncateRunes(session.Title, 256)
+		session.Source = truncateRunes(session.Source, 128)
+		session.Model = truncateRunes(nullableString(model), 128)
+		session.ProfileName = truncateRunes(nullableString(profileName), 128)
+		startedAt, err := parseRequiredUnixSecondsReal(startedAtUnix)
+		if err != nil {
+			return nil, fmt.Errorf("parse hermes session started_at: %w", err)
+		}
+		session.StartedAt = startedAt
+		session.EndedAt = parseNullableUnixSecondsReal(endedAtUnix)
+		session.LastActivityAt = parseNullableUnixSecondsReal(lastActivityUnix)
+		session.Pinned = pinned != 0
+		session.Archived = archived != 0
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate hermes sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// parseRequiredUnixSecondsReal parses a required REAL Unix-seconds column
+// (possibly with a fractional part), erroring on NULL or an invalid value.
+func parseRequiredUnixSecondsReal(v sql.NullFloat64) (time.Time, error) {
+	if !v.Valid {
+		return time.Time{}, fmt.Errorf("missing unix seconds value")
+	}
+	return unixSecondsRealToTime(v.Float64)
+}
+
+// parseNullableUnixSecondsReal parses an optional REAL Unix-seconds column,
+// returning nil on NULL or an invalid value rather than failing the whole
+// collection for a non-critical timestamp.
+func parseNullableUnixSecondsReal(v sql.NullFloat64) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t, err := unixSecondsRealToTime(v.Float64)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
+func unixSecondsRealToTime(v float64) (time.Time, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return time.Time{}, fmt.Errorf("unix seconds must be a finite, non-negative number: %v", v)
+	}
+	sec := math.Trunc(v)
+	nsec := int64(math.Round((v - sec) * float64(time.Second)))
+	return time.Unix(int64(sec), nsec).UTC(), nil
 }
 
 func parseRequiredUnixTime(v sql.NullInt64) (time.Time, error) {

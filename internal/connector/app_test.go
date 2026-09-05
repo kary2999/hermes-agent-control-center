@@ -109,6 +109,64 @@ func TestNewAcceptsExplicitKanbanDBPath(t *testing.T) {
 	}
 }
 
+func TestNewRejectsInvalidHermesStateDBPath(t *testing.T) {
+	cfg := Config{
+		DeviceID:          "mac-mini-1",
+		RelayURL:          "https://relay.example.com",
+		Token:             "secret",
+		PollInterval:      time.Second,
+		KanbanDBPath:      "/tmp/hermes/kanban.db",
+		HermesStateDBPath: "relative/state.db",
+	}
+	_, err := New(cfg, testLogger())
+	if err == nil {
+		t.Fatal("New() with relative hermes state db path: expected error, got nil")
+	}
+}
+
+func TestNewAcceptsEmptyHermesStateDBPath(t *testing.T) {
+	cfg := Config{
+		DeviceID:     "mac-mini-1",
+		RelayURL:     "https://relay.example.com",
+		Token:        "secret",
+		PollInterval: time.Second,
+		KanbanDBPath: "/tmp/hermes/kanban.db",
+	}
+	app, err := New(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sqliteCollector, ok := app.collector.(*SQLiteCollector)
+	if !ok {
+		t.Fatalf("app.collector = %T, want *SQLiteCollector", app.collector)
+	}
+	if sqliteCollector.StateDBPath != "" {
+		t.Errorf("StateDBPath = %q, want empty (session collection disabled by default)", sqliteCollector.StateDBPath)
+	}
+}
+
+func TestNewAcceptsExplicitHermesStateDBPath(t *testing.T) {
+	cfg := Config{
+		DeviceID:          "mac-mini-1",
+		RelayURL:          "https://relay.example.com",
+		Token:             "secret",
+		PollInterval:      time.Second,
+		KanbanDBPath:      "/tmp/hermes/kanban.db",
+		HermesStateDBPath: "/tmp/hermes/state.db",
+	}
+	app, err := New(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sqliteCollector, ok := app.collector.(*SQLiteCollector)
+	if !ok {
+		t.Fatalf("app.collector = %T, want *SQLiteCollector", app.collector)
+	}
+	if sqliteCollector.StateDBPath != "/tmp/hermes/state.db" {
+		t.Errorf("StateDBPath = %q, want %q", sqliteCollector.StateDBPath, "/tmp/hermes/state.db")
+	}
+}
+
 type stubCollector struct {
 	snap Snapshot
 	err  error

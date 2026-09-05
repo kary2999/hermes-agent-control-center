@@ -29,6 +29,36 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsHermesStateDBFromEnv(t *testing.T) {
+	t.Setenv("HERMES_DEVICE_ID", "mac-mini-1")
+	t.Setenv("HERMES_RELAY_URL", "https://relay.example.com")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_STATE_DB", "/tmp/hermes/state.db")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if cfg.HermesStateDBPath != "/tmp/hermes/state.db" {
+		t.Errorf("HermesStateDBPath = %q, want %q", cfg.HermesStateDBPath, "/tmp/hermes/state.db")
+	}
+}
+
+func TestLoadConfigHermesStateDBDefaultsToEmpty(t *testing.T) {
+	t.Setenv("HERMES_DEVICE_ID", "mac-mini-1")
+	t.Setenv("HERMES_RELAY_URL", "https://relay.example.com")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_STATE_DB", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if cfg.HermesStateDBPath != "" {
+		t.Errorf("HermesStateDBPath = %q, want empty by default", cfg.HermesStateDBPath)
+	}
+}
+
 func TestLoadConfigDefaultsPollInterval(t *testing.T) {
 	t.Setenv("HERMES_DEVICE_ID", "mac-mini-1")
 	t.Setenv("HERMES_RELAY_URL", "https://relay.example.com")

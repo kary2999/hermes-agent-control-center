@@ -43,39 +43,64 @@ func (s *SnapshotStore) Get() (deviceID string, snap Snapshot, receivedAt time.T
 
 // AgentSummary aggregates unfinished/running task counts for one assignee.
 type AgentSummary struct {
-	Assignee         string `json:"assignee"`
-	UnfinishedCount  int    `json:"unfinished_count"`
-	RunningCount     int    `json:"running_count"`
+	Assignee        string `json:"assignee"`
+	UnfinishedCount int    `json:"unfinished_count"`
+	RunningCount    int    `json:"running_count"`
 }
 
 // TaskView is the display-ready representation of one task, with a basic
 // progress indicator derived from its status and (if any) current run.
 type TaskView struct {
+	ID              string     `json:"id"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"`
+	Assignee        string     `json:"assignee"`
+	Priority        int        `json:"priority"`
+	Stage           string     `json:"stage"`
+	ProgressPercent int        `json:"progress_percent"`
+	IsRunning       bool       `json:"is_running"`
+	BranchName      string     `json:"branch_name,omitempty"`
+	ProjectID       string     `json:"project_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+// SessionView 是 GET /api/v1/dashboard 返回的、面向 dashboard 的显式
+// 安全会话形状。它由 SessionSummary 逐字段构建（绝不整体重新序列化），
+// 因此未来即便给 Snapshot 线上协议新增字段，也不会自动泄漏到
+// dashboard API 中。
+type SessionView struct {
 	ID               string     `json:"id"`
 	Title            string     `json:"title"`
-	Status           string     `json:"status"`
-	Assignee         string     `json:"assignee"`
-	Priority         int        `json:"priority"`
-	Stage            string     `json:"stage"`
-	ProgressPercent  int        `json:"progress_percent"`
-	IsRunning        bool       `json:"is_running"`
-	BranchName       string     `json:"branch_name,omitempty"`
-	ProjectID        string     `json:"project_id,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	Source           string     `json:"source"`
+	Model            string     `json:"model"`
+	ProfileName      string     `json:"profile_name"`
+	StartedAt        time.Time  `json:"started_at"`
+	EndedAt          *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt   *time.Time `json:"last_activity_at,omitempty"`
+	MessageCount     int        `json:"message_count"`
+	ToolCallCount    int        `json:"tool_call_count"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
+	CacheReadTokens  int64      `json:"cache_read_tokens"`
+	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	ReasoningTokens  int64      `json:"reasoning_tokens"`
+	Pinned           bool       `json:"pinned"`
+	Archived         bool       `json:"archived"`
 }
 
 // DashboardView is the JSON shape served from GET /api/v1/dashboard.
 type DashboardView struct {
-	GeneratedAt      time.Time  `json:"generated_at"`
-	HasSnapshot      bool       `json:"has_snapshot"`
-	DeviceID         string     `json:"device_id,omitempty"`
-	SnapshotTakenAt  *time.Time `json:"snapshot_taken_at,omitempty"`
-	SnapshotReceived *time.Time `json:"snapshot_received_at,omitempty"`
+	GeneratedAt      time.Time      `json:"generated_at"`
+	HasSnapshot      bool           `json:"has_snapshot"`
+	DeviceID         string         `json:"device_id,omitempty"`
+	SnapshotTakenAt  *time.Time     `json:"snapshot_taken_at,omitempty"`
+	SnapshotReceived *time.Time     `json:"snapshot_received_at,omitempty"`
 	Agents           []AgentSummary `json:"agents"`
 	ActiveTasks      []TaskView     `json:"active_tasks"`
 	RecentCompleted  []TaskView     `json:"recent_completed"`
+	Sessions         []SessionView  `json:"sessions"`
 }
 
 // maxRecentCompleted bounds how many completed tasks the dashboard shows,
@@ -92,6 +117,7 @@ func BuildDashboard(deviceID string, snap Snapshot, receivedAt time.Time, hasSna
 		HasSnapshot: hasSnapshot,
 		Agents:      []AgentSummary{},
 		ActiveTasks: []TaskView{},
+		Sessions:    []SessionView{},
 	}
 	if !hasSnapshot {
 		view.RecentCompleted = []TaskView{}
@@ -176,7 +202,37 @@ func BuildDashboard(deviceID string, snap Snapshot, receivedAt time.Time, hasSna
 	view.Agents = agents
 	view.ActiveTasks = active
 	view.RecentCompleted = completed
+	view.Sessions = buildSessionViews(snap.Sessions)
 	return view
+}
+
+// buildSessionViews maps each sanitized SessionSummary to its explicit
+// dashboard-safe SessionView field-by-field, preserving the Connector's
+// newest-first ordering.
+func buildSessionViews(sessions []SessionSummary) []SessionView {
+	views := make([]SessionView, 0, len(sessions))
+	for _, s := range sessions {
+		views = append(views, SessionView{
+			ID:               s.ID,
+			Title:            s.Title,
+			Source:           s.Source,
+			Model:            s.Model,
+			ProfileName:      s.ProfileName,
+			StartedAt:        s.StartedAt,
+			EndedAt:          s.EndedAt,
+			LastActivityAt:   s.LastActivityAt,
+			MessageCount:     s.MessageCount,
+			ToolCallCount:    s.ToolCallCount,
+			InputTokens:      s.InputTokens,
+			OutputTokens:     s.OutputTokens,
+			CacheReadTokens:  s.CacheReadTokens,
+			CacheWriteTokens: s.CacheWriteTokens,
+			ReasoningTokens:  s.ReasoningTokens,
+			Pinned:           s.Pinned,
+			Archived:         s.Archived,
+		})
+	}
+	return views
 }
 
 // deriveProgress computes a basic (percent, stage, isRunning) indicator for
