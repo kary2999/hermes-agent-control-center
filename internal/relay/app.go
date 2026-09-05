@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +29,16 @@ var (
 	ErrDataDirRequired = errors.New("data dir is required")
 	// ErrLoggerRequired is returned when New is called with a nil logger.
 	ErrLoggerRequired = errors.New("logger is required")
+	// ErrRedirectURLRequired is returned when Config.UnauthorizedRedirectURL is empty.
+	ErrRedirectURLRequired = errors.New("unauthorized redirect url is required")
+	// ErrRedirectURLInvalid is returned when Config.UnauthorizedRedirectURL is not
+	// an absolute http or https URL.
+	ErrRedirectURLInvalid = errors.New("unauthorized redirect url must be an absolute http or https url")
+	// ErrListenAddrNotLoopback is returned when Config.ListenAddr is not a
+	// TCP loopback address (127.0.0.0/8 or ::1) with a valid port. The Relay
+	// must only be reachable via a local HTTPS reverse proxy, never directly
+	// from the network.
+	ErrListenAddrNotLoopback = errors.New("listen address must be a loopback address (127.0.0.0/8 or ::1) with a valid port")
 )
 
 // shutdownTimeout bounds how long Run waits for in-flight requests to
@@ -47,12 +59,19 @@ type Config struct {
 	ReadTimeout time.Duration
 	// WriteTimeout bounds how long writing a response may take.
 	WriteTimeout time.Duration
+	// UnauthorizedRedirectURL is the absolute http(s) URL that unauthenticated
+	// or failed-verification browser requests are sent to. It must be
+	// configured by the deployment; the Relay never hardcodes a destination.
+	UnauthorizedRedirectURL string
 }
 
 // Validate reports whether the Config is complete and internally consistent.
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.ListenAddr) == "" {
 		return ErrListenAddrRequired
+	}
+	if !isLoopbackListenAddr(c.ListenAddr) {
+		return ErrListenAddrNotLoopback
 	}
 	if strings.TrimSpace(c.Token) == "" {
 		return ErrTokenRequired
@@ -66,7 +85,27 @@ func (c Config) Validate() error {
 	if c.WriteTimeout <= 0 {
 		return ErrWriteTimeoutInvalid
 	}
+	if strings.TrimSpace(c.UnauthorizedRedirectURL) == "" {
+		return ErrRedirectURLRequired
+	}
+	redirectURL, err := url.Parse(c.UnauthorizedRedirectURL)
+	if err != nil || (redirectURL.Scheme != "http" && redirectURL.Scheme != "https") || redirectURL.Host == "" {
+		return ErrRedirectURLInvalid
+	}
 	return nil
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	port, err := strconv.Atoi(portText)
+	return err == nil && port >= 0 && port <= 65535
 }
 
 // App is the running Relay process.
@@ -85,7 +124,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("relay: invalid config: %w", err)
 	}
 	store := NewSnapshotStore()
-	return &App{cfg: cfg, logger: logger, handler: NewHandler(store, cfg.Token, logger)}, nil
+	handler, err := NewHandler(store, cfg.Token, cfg.UnauthorizedRedirectURL, logger)
+	if err != nil {
+		return nil, fmt.Errorf("relay: construct handler: %w", err)
+	}
+	return &App{cfg: cfg, logger: logger, handler: handler}, nil
 }
 
 // Run starts the Relay's HTTP server and blocks until ctx is canceled. It

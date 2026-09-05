@@ -32,10 +32,13 @@ go build -o dist/hermes-relay ./cmd/relay
 ## 启动 Relay
 
 ```bash
-export HERMES_RELAY_LISTEN_ADDR=":8080"
+export HERMES_RELAY_LISTEN_ADDR="127.0.0.1:8080"
 export HERMES_RELAY_TOKEN="<本地生成的高熵令牌>"
+export HERMES_UNAUTHORIZED_REDIRECT_URL="https://未认证时跳转的安全地址"
 ./dist/hermes-relay
 ```
+
+Relay 强制仅监听回环地址，必须通过服务器上的 HTTPS 反向代理对外提供访问，禁止直接暴露明文 HTTP 端口。
 
 ## 启动 Connector
 
@@ -48,7 +51,7 @@ export HERMES_POLL_INTERVAL="10s"
 ./dist/hermes-connector
 ```
 
-浏览器访问 Relay 根地址。页面首次打开时输入同一共享令牌；令牌只保存在当前浏览器本地存储中。
+浏览器访问 Relay 根地址后，页面只显示通用令牌验证提示；令牌正确时换取安全的限时会话 Cookie 并进入 `/dashboard`，取消或验证失败会跳转到 `HERMES_UNAUTHORIZED_REDIRECT_URL`。共享令牌不会保存到浏览器存储。
 
 ## MVP 边界
 

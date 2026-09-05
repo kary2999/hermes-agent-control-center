@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verification</title>
+</head>
+<body>
+<p>Verifying access&hellip;</p>
+<script>
+(function () {
+  var REDIRECT_URL = "{{.RedirectURL}}";
+
+  function redirectAway() {
+    window.location.replace(REDIRECT_URL);
+  }
+
+  var token = window.prompt('Enter access code:');
+  if (!token || !token.trim()) {
+    redirectAway();
+    return;
+  }
+
+  fetch('/api/v1/session', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token.trim() }
+  }).then(function (res) {
+    if (!res.ok) {
+      redirectAway();
+      return;
+    }
+    window.location.replace('/dashboard');
+  }).catch(function () {
+    redirectAway();
+  });
+})();
+</script>
+</body>
+</html>

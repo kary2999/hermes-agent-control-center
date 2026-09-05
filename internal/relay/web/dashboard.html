@@ -63,20 +63,6 @@
 
 <script>
 (function () {
-  var TOKEN_KEY = 'hermes_relay_token';
-  var token = sessionStorage.getItem(TOKEN_KEY);
-
-  function ensureToken() {
-    if (!token) {
-      var input = window.prompt('请输入访问令牌 (Token)：');
-      if (input) {
-        token = input.trim();
-        sessionStorage.setItem(TOKEN_KEY, token);
-      }
-    }
-    return token;
-  }
-
   function fmtTime(iso) {
     if (!iso) return '-';
     var d = new Date(iso);
@@ -157,17 +143,12 @@
   }
 
   function load() {
-    if (!ensureToken()) {
-      showError('需要访问令牌才能加载数据');
-      return;
-    }
     document.getElementById('status').textContent = '加载中…';
-    fetch('/api/v1/dashboard', { headers: { Authorization: 'Bearer ' + token } })
+    fetch('/api/v1/dashboard', { credentials: 'same-origin' })
       .then(function (res) {
         if (res.status === 401) {
-          sessionStorage.removeItem(TOKEN_KEY);
-          token = null;
-          throw new Error('令牌无效，请刷新页面后重新输入');
+          window.location.replace('/');
+          throw new Error('会话已失效，正在跳转');
         }
         if (!res.ok) {
           throw new Error('请求失败: HTTP ' + res.status);
