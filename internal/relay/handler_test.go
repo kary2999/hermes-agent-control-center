@@ -190,7 +190,7 @@ func TestHandleGateEmbedsConfiguredRedirectAndFallbackFlow(t *testing.T) {
 	}
 }
 
-func TestHandleGateRedirectsToDashboardWithValidSession(t *testing.T) {
+func TestHandleGateRedirectsToDemoV2WithValidSession(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)
 
@@ -201,8 +201,22 @@ func TestHandleGateRedirectsToDashboardWithValidSession(t *testing.T) {
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/dashboard" {
-		t.Errorf("Location = %q, want %q", loc, "/dashboard")
+	if loc := resp.Header.Get("Location"); loc != "/demo-v2" {
+		t.Errorf("Location = %q, want %q", loc, "/demo-v2")
+	}
+}
+
+func TestHandleGateSuccessfulTokenExchangeScriptRedirectsToDemoV2(t *testing.T) {
+	h := newTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "window.location.replace('/demo-v2')") {
+		t.Error("gate page script must redirect a successful token exchange to /demo-v2")
+	}
+	if strings.Contains(body, "window.location.replace('/dashboard')") {
+		t.Error("gate page script must not redirect a successful token exchange to /dashboard")
 	}
 }
 

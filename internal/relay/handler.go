@@ -202,11 +202,11 @@ func matchesBearer(r *http.Request, want string) bool {
 // script collects a token, exchanges it for a session via
 // POST /api/v1/session, and sends any cancellation or failure to the
 // configured external redirect. A request that already carries a valid
-// session cookie is sent straight to /dashboard instead of being prompted
+// session cookie is sent straight to /demo-v2 instead of being prompted
 // again.
 func (h *Handler) handleGate(w http.ResponseWriter, r *http.Request) {
 	if h.hasValidSession(r) {
-		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		http.Redirect(w, r, "/demo-v2", http.StatusFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
