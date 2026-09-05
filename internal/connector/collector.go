@@ -401,14 +401,14 @@ func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
 	for rows.Next() {
 		var (
 			session                       SessionSummary
-			model, profileName            sql.NullString
+			title, model, profileName     sql.NullString
 			startedAtUnix                 sql.NullFloat64
 			endedAtUnix, lastActivityUnix sql.NullFloat64
 			pinned, archived              int64
 		)
 		if err := rows.Scan(
 			&session.ID,
-			&session.Title,
+			&title,
 			&session.Source,
 			&model,
 			&profileName,
@@ -427,7 +427,7 @@ func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scan hermes session row: %w", err)
 		}
-		session.Title = truncateRunes(session.Title, 256)
+		session.Title = truncateRunes(nullableString(title), 256)
 		session.Source = truncateRunes(session.Source, 128)
 		session.Model = truncateRunes(nullableString(model), 128)
 		session.ProfileName = truncateRunes(nullableString(profileName), 128)

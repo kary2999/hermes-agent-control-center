@@ -17,10 +17,12 @@ import (
 // table that includes every allowed column plus a battery of forbidden
 // sentinel columns (user_id, chat_id, ..., cost_usd). Tests use the sentinel
 // columns to prove the collector's explicit SELECT never touches them.
+// title、model、profile_name 与真实 Hermes state.db schema 一致设为可空；
+// source 在真实 schema 中同样为 NOT NULL，因此此处保持必填。
 const sessionSchemaWithSentinels = `
 	CREATE TABLE sessions (
 		id TEXT PRIMARY KEY,
-		title TEXT NOT NULL,
+		title TEXT,
 		source TEXT NOT NULL,
 		model TEXT,
 		profile_name TEXT,
@@ -79,6 +81,14 @@ func emptyKanbanFixture(t *testing.T) string {
 
 func insertSentinelSession(t *testing.T, db *sql.DB, id string, startedAt, endedAt, lastActivityAt any, hidden int) {
 	t.Helper()
+	insertSentinelSessionWithText(t, db, id, "标题 title", "gpt-5", "default", startedAt, endedAt, lastActivityAt, hidden)
+}
+
+// insertSentinelSessionWithText 是 insertSentinelSession 的参数化版本，将
+// title、model、profile_name 改为 `any` 类型，便于测试传入 nil 以模拟 Hermes
+// 真实 schema 中这三列可空的情况。
+func insertSentinelSessionWithText(t *testing.T, db *sql.DB, id string, title, model, profileName any, startedAt, endedAt, lastActivityAt any, hidden int) {
+	t.Helper()
 	mustExec(t, db, `
 		INSERT INTO sessions (
 			id, title, source, model, profile_name, started_at, ended_at, last_activity_at,
@@ -88,7 +98,7 @@ func insertSentinelSession(t *testing.T, db *sql.DB, id string, startedAt, ended
 			git_branch, billing_url, last_activity_description, cost_usd
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		id, "标题 title", "cli", "gpt-5", "default",
+		id, title, "cli", model, profileName,
 		startedAt, endedAt, lastActivityAt,
 		3, 2, 100, 200, 10, 20, 5, 1, 0, hidden,
 		"SECRET-USER-ID", "SECRET-CHAT-ID", "SECRET-THREAD-ID", "SECRET-SESSION-KEY",
@@ -155,6 +165,69 @@ func TestSQLiteCollectorMapsSessionsFromExplicitColumnsAndExcludesSentinelSecret
 		if strings.Contains(string(body), word) {
 			t.Errorf("collected snapshot JSON leaks forbidden field/value %q:\n%s", word, body)
 		}
+	}
+}
+
+// TestSQLiteCollectorMapsNullOptionalTextColumnsToEmptyString
+// 是针对生产环境 bug 的回归测试：真实 Hermes state.db 中 title、model 或
+// profile_name 为 NULL 的会话行会导致 Snapshot() 失败，报错
+// "converting NULL to string is unsupported"（原因是 title 被直接 Scan 进
+// string 字段，而非 sql.NullString）。source 与真实 schema 一致保持
+// NOT NULL，因此这里恒不为 nil。
+func TestSQLiteCollectorMapsNullOptionalTextColumnsToEmptyString(t *testing.T) {
+	tests := []struct {
+		name        string
+		title       any
+		model       any
+		profileName any
+	}{
+		{name: "all three null", title: nil, model: nil, profileName: nil},
+		{name: "only title null", title: nil, model: "gpt-5", profileName: "default"},
+		{name: "only model null", title: "标题 title", model: nil, profileName: "default"},
+		{name: "only profile_name null", title: "标题 title", model: "gpt-5", profileName: nil},
+		{name: "none null", title: "标题 title", model: "gpt-5", profileName: "default"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kanbanPath := emptyKanbanFixture(t)
+			statePath := createStateDBFixture(t, func(db *sql.DB) {
+				mustExec(t, db, sessionSchemaWithSentinels)
+				insertSentinelSessionWithText(t, db, "sess-1", tt.title, tt.model, tt.profileName, 1756861323.5, nil, nil, 0)
+			})
+
+			c, err := NewSQLiteCollectorWithStateDB(kanbanPath, statePath)
+			if err != nil {
+				t.Fatalf("NewSQLiteCollectorWithStateDB() error = %v", err)
+			}
+			snap, err := c.Snapshot(context.Background())
+			if err != nil {
+				t.Fatalf("Snapshot() error = %v, want nil even with NULL optional text columns", err)
+			}
+			if len(snap.Sessions) != 1 {
+				t.Fatalf("len(Sessions) = %d, want 1", len(snap.Sessions))
+			}
+
+			s := snap.Sessions[0]
+			wantString := func(v any) string {
+				if v == nil {
+					return ""
+				}
+				return v.(string)
+			}
+			if want := wantString(tt.title); s.Title != want {
+				t.Errorf("Title = %q, want %q", s.Title, want)
+			}
+			if want := wantString(tt.model); s.Model != want {
+				t.Errorf("Model = %q, want %q", s.Model, want)
+			}
+			if want := wantString(tt.profileName); s.ProfileName != want {
+				t.Errorf("ProfileName = %q, want %q", s.ProfileName, want)
+			}
+			if s.Source != "cli" {
+				t.Errorf("Source = %q, want %q (source is NOT NULL in the real schema)", s.Source, "cli")
+			}
+		})
 	}
 }
 
