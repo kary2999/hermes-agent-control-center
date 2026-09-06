@@ -13,6 +13,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -31,7 +35,8 @@ var (
 	// positive duration.
 	ErrPollIntervalInvalid = errors.New("poll interval must be positive")
 	// ErrLoggerRequired is returned when New is called with a nil logger.
-	ErrLoggerRequired = errors.New("logger is required")
+	ErrLoggerRequired        = errors.New("logger is required")
+	ErrHandoffCommandInvalid = errors.New("handoff command must be an absolute executable path")
 )
 
 // Config holds the settings needed to run the Connector process.
@@ -56,6 +61,7 @@ type Config struct {
 	// RequestTimeout bounds each collect+report cycle. Defaults to
 	// PollInterval when zero and PollInterval is set.
 	RequestTimeout time.Duration
+	HandoffCommand string
 }
 
 // Validate reports whether the Config is complete and internally consistent.
@@ -78,6 +84,15 @@ func (c Config) Validate() error {
 	}
 	if c.PollInterval <= 0 {
 		return ErrPollIntervalInvalid
+	}
+	if strings.TrimSpace(c.HandoffCommand) != "" {
+		if !filepath.IsAbs(c.HandoffCommand) {
+			return ErrHandoffCommandInvalid
+		}
+		info, err := os.Stat(c.HandoffCommand)
+		if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+			return ErrHandoffCommandInvalid
+		}
 	}
 	return nil
 }
@@ -102,7 +117,10 @@ type App struct {
 	logger      *slog.Logger
 	collector   Collector
 	snapshotURL string
+	claimURL    string
+	resultURL   string
 	httpClient  *http.Client
+	runner      HandoffRunner
 }
 
 // New validates cfg, resolves the Hermes kanban.db path when needed, and
@@ -133,7 +151,10 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		logger:      logger,
 		collector:   collector,
 		snapshotURL: strings.TrimRight(cfg.RelayURL, "/") + "/api/v1/snapshot",
+		claimURL:    strings.TrimRight(cfg.RelayURL, "/") + "/api/v1/handoff/claim",
+		resultURL:   strings.TrimRight(cfg.RelayURL, "/") + "/api/v1/handoff/result",
 		httpClient:  &http.Client{},
+		runner:      ExecHandoffRunner{},
 	}, nil
 }
 
@@ -183,9 +204,13 @@ func (a *App) reportOnce(ctx context.Context) {
 		slog.Int("tasks", len(snap.Tasks)),
 		slog.Int("runs", len(snap.Runs)),
 	)
+	if strings.TrimSpace(a.cfg.HandoffCommand) != "" {
+		a.processOneHandoff(reqCtx)
+	}
 }
 
 func (a *App) postSnapshot(ctx context.Context, snap Snapshot) error {
+	snap.Capabilities.LarkHandoff = strings.TrimSpace(a.cfg.HandoffCommand) != ""
 	body, err := json.Marshal(SnapshotPayload{DeviceID: a.cfg.DeviceID, Snapshot: snap})
 	if err != nil {
 		return fmt.Errorf("marshal snapshot: %w", err)
@@ -203,10 +228,121 @@ func (a *App) postSnapshot(ctx context.Context, snap Snapshot) error {
 		return fmt.Errorf("send snapshot request: %w", err)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); err != nil {
+		return fmt.Errorf("read snapshot response: %w", err)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("relay rejected snapshot: status %d", resp.StatusCode)
 	}
 	return nil
 }
+
+type HandoffRunner interface {
+	Run(ctx context.Context, executable, sessionID string) error
+}
+
+type ExecHandoffRunner struct{}
+
+func (ExecHandoffRunner) Run(ctx context.Context, executable, sessionID string) error {
+	cmd := exec.CommandContext(ctx, executable, "sessions", "handoff", sessionID, "--platform", "feishu")
+	out, err := cmd.CombinedOutput()
+	if len(out) > 4096 {
+		out = out[:4096]
+	}
+	if err != nil {
+		return fmt.Errorf("handoff command failed: %w", err)
+	}
+	return nil
+}
+
+type handoffClaimResponse struct {
+	Command *handoffCommandWire `json:"command"`
+}
+
+type handoffCommandWire struct {
+	CommandID       string `json:"command_id"`
+	SessionID       string `json:"session_id"`
+	HandoffState    string `json:"handoff_state"`
+	HandoffPlatform string `json:"handoff_platform"`
+}
+
+func (a *App) processOneHandoff(ctx context.Context) {
+	cmd, ok, err := a.claimHandoff(ctx)
+	if err != nil {
+		a.logger.Error("claim handoff failed", slog.String("error_kind", "claim"))
+		return
+	}
+	if !ok {
+		return
+	}
+	if !validSessionID(cmd.SessionID) {
+		a.logger.Error("execute handoff rejected", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "invalid_session_id"))
+		_ = a.postHandoffResult(ctx, cmd.CommandID, "failed")
+		return
+	}
+	status := "completed"
+	if err := a.runner.Run(ctx, a.cfg.HandoffCommand, cmd.SessionID); err != nil {
+		status = "failed"
+		a.logger.Error("execute handoff failed", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "exec"))
+	}
+	if err := a.postHandoffResult(ctx, cmd.CommandID, status); err != nil {
+		a.logger.Error("report handoff result failed", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "result"))
+	}
+}
+
+func (a *App) claimHandoff(ctx context.Context) (handoffCommandWire, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.claimURL, nil)
+	if err != nil {
+		return handoffCommandWire{}, false, fmt.Errorf("build handoff claim request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return handoffCommandWire{}, false, fmt.Errorf("send handoff claim request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); err != nil {
+			return handoffCommandWire{}, false, fmt.Errorf("read handoff claim response: %w", err)
+		}
+		return handoffCommandWire{}, false, fmt.Errorf("relay rejected handoff claim: status %d", resp.StatusCode)
+	}
+	var payload handoffClaimResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&payload); err != nil {
+		return handoffCommandWire{}, false, fmt.Errorf("decode handoff claim: %w", err)
+	}
+	if payload.Command == nil {
+		return handoffCommandWire{}, false, nil
+	}
+	return *payload.Command, true, nil
+}
+
+func (a *App) postHandoffResult(ctx context.Context, commandID, status string) error {
+	body, err := json.Marshal(map[string]string{"command_id": commandID, "status": status})
+	if err != nil {
+		return fmt.Errorf("marshal handoff result: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.resultURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build handoff result request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send handoff result request: %w", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); err != nil {
+		return fmt.Errorf("read handoff result response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("relay rejected handoff result: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+var connectorSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+
+func validSessionID(s string) bool { return connectorSessionIDPattern.MatchString(s) }
