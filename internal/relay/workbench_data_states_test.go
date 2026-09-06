@@ -179,8 +179,8 @@ func TestWorkbenchStaleAndErrorMessagesStaySafeAndGeneric(t *testing.T) {
 
 // TestWorkbenchNumericZeroFieldsNeverCollapseToDashPlaceholder 校验数值型
 // 字段（消息数、工具调用次数、各类 token 计数、未完成/运行中任务数）始终
-// 用 String(...) 显式转换渲染，不会被 `value || "—"` 这类假值兜底逻辑
-// 误伤，导致合法的 0 被显示成空白或短横线。
+// 用显式格式化渲染，不会被 `value || "—"` 这类假值兜底逻辑误伤，
+// 导致合法的 0 被显示成空白或短横线。
 func TestWorkbenchNumericZeroFieldsNeverCollapseToDashPlaceholder(t *testing.T) {
 	body := workbenchBody(t)
 
@@ -190,13 +190,38 @@ func TestWorkbenchNumericZeroFieldsNeverCollapseToDashPlaceholder(t *testing.T) 
 		"total_session_count", "active_session_count",
 	}
 	for _, field := range numericFields {
-		if !strings.Contains(body, "String(session."+field+")") && !strings.Contains(body, "String(agent."+field+")") {
+		if strings.HasSuffix(field, "_tokens") {
+			if !strings.Contains(body, "formatTokenMillions(session."+field+")") && !strings.Contains(body, "formatTokenMillions(agent."+field+")") {
+				t.Errorf("expected explicit M-token formatting for numeric token field %q", field)
+			}
+		} else if !strings.Contains(body, "String(session."+field+")") && !strings.Contains(body, "String(agent."+field+")") {
 			t.Errorf("expected an explicit String(...) conversion for numeric field %q", field)
 		}
 		dashPattern := field + ` || "—"`
 		if strings.Contains(body, dashPattern) {
 			t.Errorf("numeric field %q must not fall back to a dash on a legitimate zero value: found %q", field, dashPattern)
 		}
+	}
+}
+
+func TestWorkbenchFormatsTokensInMillionsAndLimitsActivityFeed(t *testing.T) {
+	body := workbenchBody(t)
+
+	for _, marker := range []string{
+		"function formatTokenMillions(value)",
+		`return "0 M"`,
+		`return "0.01 M"`,
+		"formatTokenMillions(agent.cache_read_tokens)",
+		"formatTokenMillions(session.cache_read_tokens)",
+		"formatTokenMillions(tokenTotal)",
+		"return items.slice(0, 10)",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("workbench must format token counters in M and limit recent activity via %q", marker)
+		}
+	}
+	if strings.Contains(body, "return items.slice(0, 20)") {
+		t.Error("recent activity must be capped at 10 items, not the old 20-item limit")
 	}
 }
 
