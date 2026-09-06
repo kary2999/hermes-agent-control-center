@@ -1654,6 +1654,7 @@
       hint = "已创建，可在 Lark 查看";
     } else if (handoffState === "failed") {
       label = "重试";
+      hint = session.handoff_reason || "上次创建中断，可重试";
     }
     actionButton.textContent = label;
     actionButton.disabled = disabled;
@@ -1684,7 +1685,7 @@
       ["最新用户提示时间", session.last_user_prompt_at ? formatDateTime(session.last_user_prompt_at) : "—"],
       ["置顶", session.pinned ? "是" : "否"],
       ["归档", session.archived ? "是" : "否"],
-      ["Lark 交接", dashboardData && dashboardData.lark_handoff_available ? "可用" : (dashboardData && dashboardData.lark_handoff_reason || "不可用")]
+      ["Lark 交接", session.handoff_state === "failed" ? (session.handoff_reason || "已中断，原因未知") : (dashboardData && dashboardData.lark_handoff_available ? "可用" : (dashboardData && dashboardData.lark_handoff_reason || "不可用"))]
     ];
     fields.forEach(function (pair) {
       dl.appendChild(makeEl("dt", { text: pair[0] }));

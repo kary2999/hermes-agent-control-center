@@ -385,6 +385,7 @@ func (h *Handler) handlePostHandoffResult(w http.ResponseWriter, r *http.Request
 	var body struct {
 		CommandID string `json:"command_id"`
 		Status    string `json:"status"`
+		Error     string `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CommandID == "" {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -394,7 +395,7 @@ func (h *Handler) handlePostHandoffResult(w http.ResponseWriter, r *http.Request
 	if body.Status == handoffCommandStateCompleted {
 		state = handoffCommandStateCompleted
 	}
-	cmd, err := h.handoffStore.Complete(body.CommandID, state)
+	cmd, err := h.handoffStore.Complete(body.CommandID, state, body.Error)
 	if err != nil {
 		http.Error(w, `{"error":"unknown command"}`, http.StatusNotFound)
 		return
@@ -425,6 +426,7 @@ func sanitizeHandoffCommand(cmd HandoffCommand) map[string]string {
 		"handoff_state":    cmd.State,
 		"handoff_platform": cmd.Platform,
 		"result_status":    cmd.ResultStatus,
+		"handoff_reason":   sanitizeHandoffReason(cmd.Error),
 	}
 }
 
@@ -472,6 +474,7 @@ func (h *Handler) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
 			view.Sessions[i].HandoffPlatform = handoffPlatformFeishu
 			if cmd.State == handoffCommandStateFailed {
 				view.Sessions[i].HandoffState = handoffCommandStateFailed
+				view.Sessions[i].HandoffReason = sanitizeHandoffReason(cmd.Error)
 			} else {
 				view.Sessions[i].HandoffState = "pending"
 			}

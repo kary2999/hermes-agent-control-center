@@ -125,7 +125,7 @@ func TestPostLarkHandoffRetriesFailedSnapshotButReusesCompleted(t *testing.T) {
 	if err := json.NewDecoder(firstResp.Body).Decode(&first); err != nil {
 		t.Fatalf("decode first response: %v", err)
 	}
-	if _, err := h.handoffStore.Complete(first["command_id"], handoffCommandStateCompleted); err != nil {
+	if _, err := h.handoffStore.Complete(first["command_id"], handoffCommandStateCompleted, ""); err != nil {
 		t.Fatalf("complete command: %v", err)
 	}
 
@@ -202,6 +202,40 @@ func TestDashboardUsesQueuedHandoffUntilHermesStateArrives(t *testing.T) {
 	}
 	if got := completed.Sessions[0].HandoffState; got != "completed" {
 		t.Fatalf("Hermes dashboard handoff state = %q, want completed", got)
+	}
+}
+
+func TestDashboardShowsFailedHandoffReasonFromRelayQueue(t *testing.T) {
+	h := newHandoffTestHandler(t)
+	cookie := validSessionCookieWithToken(t, h, "handoff-only-token")
+	enqueue := newHandoffRequest(`{"idempotency_key":"550e8400-e29b-41d4-a716-446655440000"}`)
+	enqueue.AddCookie(cookie)
+	resp := doRequest(h, enqueue)
+	var created map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode enqueue response: %v", err)
+	}
+
+	resultReq := httptest.NewRequest(http.MethodPost, "/api/v1/handoff/result", strings.NewReader(`{"command_id":"`+created["command_id"]+`","status":"failed","error":"handoff command failed: token=sk-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"}`))
+	resultReq.Header.Set("Content-Type", "application/json")
+	resultReq.Header.Set("Authorization", "Bearer "+testToken)
+	if resp := doRequest(h, resultReq); resp.StatusCode != http.StatusOK {
+		t.Fatalf("handoff result status = %d, want 200", resp.StatusCode)
+	}
+
+	dashboardReq := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil)
+	dashboardReq.AddCookie(cookie)
+	resp = doRequest(h, dashboardReq)
+	var dashboard DashboardView
+	if err := json.NewDecoder(resp.Body).Decode(&dashboard); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if got := dashboard.Sessions[0].HandoffState; got != handoffCommandStateFailed {
+		t.Fatalf("handoff state = %q, want failed", got)
+	}
+	reason := dashboard.Sessions[0].HandoffReason
+	if reason == "" || strings.Contains(reason, "sk-") || !strings.Contains(reason, redactedPlaceholder) {
+		t.Fatalf("handoff reason = %q, want redacted failure reason", reason)
 	}
 }
 

@@ -47,6 +47,9 @@ type HandoffCommand struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 	LeaseExpiresAt     *time.Time `json:"lease_expires_at,omitempty"`
 	ResultStatus       string     `json:"result_status,omitempty"`
+	// Error 是 Connector 执行 handoff 失败后上报的脱敏、有界原因。只用于
+	// dashboard 提示“为什么中断”，不包含完整命令输出或敏感上下文。
+	Error string `json:"error,omitempty"`
 }
 
 type HandoffStoreCreateResult struct {
@@ -181,7 +184,7 @@ func (s *HandoffStore) LatestForSession(sessionID string) (HandoffCommand, bool,
 	return latest, found, nil
 }
 
-func (s *HandoffStore) Complete(id, state string) (HandoffCommand, error) {
+func (s *HandoffStore) Complete(id, state, reason string) (HandoffCommand, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -197,6 +200,11 @@ func (s *HandoffStore) Complete(id, state string) (HandoffCommand, error) {
 			s.cmds[i].UpdatedAt = now
 			s.cmds[i].LeaseExpiresAt = nil
 			s.cmds[i].ResultStatus = state
+			if state == handoffCommandStateFailed {
+				s.cmds[i].Error = sanitizeHandoffReason(reason)
+			} else {
+				s.cmds[i].Error = ""
+			}
 			if err := s.saveLocked(); err != nil {
 				return HandoffCommand{}, err
 			}

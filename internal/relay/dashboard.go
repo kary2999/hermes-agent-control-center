@@ -116,6 +116,8 @@ type SessionView struct {
 	LastUserPromptAt *time.Time `json:"last_user_prompt_at,omitempty"`
 	HandoffState     string     `json:"handoff_state,omitempty"`
 	HandoffPlatform  string     `json:"handoff_platform,omitempty"`
+	// HandoffReason 是 handoff 失败或中断时展示给用户的简短原因。
+	HandoffReason string `json:"handoff_reason,omitempty"`
 }
 
 // DashboardView is the JSON shape served from GET /api/v1/dashboard.
@@ -387,9 +389,22 @@ func buildSessionViews(sessions []SessionSummary) []SessionView {
 			LastUserPromptAt: s.LastUserPromptAt,
 			HandoffState:     mapRelayHandoffState(s.HandoffState),
 			HandoffPlatform:  mapRelayHandoffPlatform(s.HandoffPlatform),
+			HandoffReason:    sanitizeHandoffReason(s.HandoffReason),
 		})
 	}
 	return views
+}
+
+const maxSessionHandoffReasonRunes = 200
+
+// sanitizeHandoffReason 只保留一行、脱敏后的短原因，避免把命令输出或密钥
+// 带到 Lark 工作台。
+func sanitizeHandoffReason(raw string) string {
+	reason := strings.Join(strings.Fields(raw), " ")
+	if reason == "" {
+		return ""
+	}
+	return truncateRunes(sanitizePreview(reason), maxSessionHandoffReasonRunes)
 }
 
 func mapRelayHandoffState(raw string) string {

@@ -221,6 +221,8 @@ func TestWorkbenchShowsTruthfulDisabledLarkHandoffStatus(t *testing.T) {
 	for _, marker := range []string{
 		"lark_handoff_available",
 		"lark_handoff_reason",
+		"handoff_reason",
+		"上次创建中断，可重试",
 		"Lark 交接",
 	} {
 		if !strings.Contains(body, marker) {

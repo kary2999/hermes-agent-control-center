@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,37 @@ func TestProcessOneHandoffRunsExactCommandAndPostsResult(t *testing.T) {
 	}
 	if !bytes.Contains(rt.resultBody, []byte(`"command_id":"cmd_1"`)) || !bytes.Contains(rt.resultBody, []byte(`"status":"completed"`)) {
 		t.Fatalf("result body = %s, want sanitized completed result", rt.resultBody)
+	}
+}
+
+func TestProcessOneHandoffReportsFailureReasonWhenCommandFails(t *testing.T) {
+	rt := &handoffRoundTripper{}
+	secret := "sk-" + strings.Repeat("C", 48)
+	runner := &recordingRunner{err: errors.New("handoff failed: token=" + secret)}
+	app := &App{
+		cfg:        Config{DeviceID: "mac", RelayURL: "https://relay.example.com", Token: "token", PollInterval: time.Second, HandoffCommand: "/bin/hermes"},
+		logger:     testLogger(),
+		claimURL:   "https://relay.example.com/api/v1/handoff/claim",
+		resultURL:  "https://relay.example.com/api/v1/handoff/result",
+		httpClient: &http.Client{Transport: rt},
+		runner:     runner,
+	}
+	app.processOneHandoff(context.Background())
+	if !bytes.Contains(rt.resultBody, []byte(`"status":"failed"`)) {
+		t.Fatalf("result body = %s, want failed status", rt.resultBody)
+	}
+	var decoded struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(rt.resultBody, &decoded); err != nil {
+		t.Fatalf("decode result body: %v", err)
+	}
+	if decoded.Error == "" {
+		t.Fatal("result body error field is empty, want the sanitized runner failure reason")
+	}
+	if strings.Contains(decoded.Error, secret) || !strings.Contains(decoded.Error, redactedPlaceholder) {
+		t.Fatalf("result body error = %q, want it to redact the runner failure reason", decoded.Error)
 	}
 }
 
@@ -156,7 +188,7 @@ func TestConnectorResponseBodyReadErrors(t *testing.T) {
 			resultURL:  "https://relay.example.com/api/v1/handoff/result",
 			httpClient: &http.Client{Transport: bodyErrorRoundTripper{path: "/api/v1/handoff/result", err: readErr}},
 		}
-		if err := app.postHandoffResult(context.Background(), "cmd_1", "completed"); !errors.Is(err, readErr) {
+		if err := app.postHandoffResult(context.Background(), "cmd_1", "completed", ""); !errors.Is(err, readErr) {
 			t.Fatalf("postHandoffResult() error = %v, want readErr", err)
 		}
 	})
@@ -166,13 +198,14 @@ type recordingRunner struct {
 	executable string
 	sessionID  string
 	called     bool
+	err        error
 }
 
 func (r *recordingRunner) Run(ctx context.Context, executable, sessionID string) error {
 	r.called = true
 	r.executable = executable
 	r.sessionID = sessionID
-	return nil
+	return r.err
 }
 
 type handoffRoundTripper struct {

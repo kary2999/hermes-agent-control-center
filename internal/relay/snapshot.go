@@ -78,6 +78,8 @@ type SessionSummary struct {
 	LastUserPromptAt *time.Time `json:"last_user_prompt_at,omitempty"`
 	HandoffState     string     `json:"handoff_state,omitempty"`
 	HandoffPlatform  string     `json:"handoff_platform,omitempty"`
+	// HandoffReason 是 handoff 失败或中断时来自 Connector 的脱敏短原因。
+	HandoffReason string `json:"handoff_reason,omitempty"`
 }
 
 type Snapshot struct {
