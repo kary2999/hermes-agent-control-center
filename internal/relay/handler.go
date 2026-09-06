@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -40,11 +43,13 @@ type Handler struct {
 	store          *SnapshotStore
 	token          string
 	dashboardToken string
+	handoffToken   string
 	redirectURL    string
 	sessionKey     []byte
 	gatePage       []byte
 	logger         *slog.Logger
 	now            func() time.Time
+	handoffStore   *HandoffStore
 }
 
 // NewHandler constructs a Handler backed by store, authenticating
@@ -53,20 +58,29 @@ type Handler struct {
 // exchange only, and sending unauthenticated or failed-verification browser
 // requests to redirectURL. It returns an error if the embedded gate page
 // template fails to render.
-func NewHandler(store *SnapshotStore, token, dashboardToken, redirectURL string, logger *slog.Logger) (*Handler, error) {
+func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redirectURL string, logger *slog.Logger, dataDir string) (*Handler, error) {
 	gatePage, err := renderGatePage(redirectURL)
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
+	}
+	var handoffStore *HandoffStore
+	if handoffToken != "" && dataDir != "" {
+		handoffStore, err = NewHandoffStore(dataDir, token)
+		if err != nil {
+			return nil, fmt.Errorf("construct handoff store: %w", err)
+		}
 	}
 	return &Handler{
 		store:          store,
 		token:          token,
 		dashboardToken: dashboardToken,
+		handoffToken:   handoffToken,
 		redirectURL:    redirectURL,
 		sessionKey:     deriveSessionKey(token),
 		gatePage:       gatePage,
 		logger:         logger,
 		now:            time.Now,
+		handoffStore:   handoffStore,
 	}, nil
 }
 
@@ -92,6 +106,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /dashboard", h.requireSession(h.handleDashboardPage))
 	mux.HandleFunc("GET /workbench", h.requireSession(h.handleWorkbenchPage))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
+	mux.HandleFunc("POST /api/v1/sessions/{session_id}/lark-handoff", h.requireHandoffSession(h.handlePostLarkHandoff))
+	mux.HandleFunc("POST /api/v1/handoff/claim", h.requireAuth(h.handlePostHandoffClaim))
+	mux.HandleFunc("POST /api/v1/handoff/result", h.requireAuth(h.handlePostHandoffResult))
 	mux.HandleFunc("POST /api/v1/snapshot", h.requireAuth(h.handlePostSnapshot))
 	return withNoStore(mux)
 }
@@ -145,6 +162,16 @@ func (h *Handler) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (h *Handler) requireHandoffSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.hasValidSessionScope(r, sessionScopeHandoff) {
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (h *Handler) rejectUnauthorized(w http.ResponseWriter, r *http.Request) {
 	h.logger.Warn("rejected unauthorized request",
 		slog.String("method", r.Method),
@@ -156,11 +183,22 @@ func (h *Handler) rejectUnauthorized(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) hasValidSession(r *http.Request) bool {
+	return h.hasValidSessionScope(r, sessionScopeRead)
+}
+
+func (h *Handler) hasValidSessionScope(r *http.Request, want string) bool {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		return false
 	}
-	return verifySessionValue(h.sessionKey, cookie.Value, h.now())
+	scope, ok := verifySessionValueScope(h.sessionKey, cookie.Value, h.now())
+	if !ok {
+		return false
+	}
+	if want == sessionScopeRead {
+		return scope == sessionScopeRead || scope == sessionScopeHandoff
+	}
+	return scope == want
 }
 
 // isAuthorized 只认共享 Relay token，用于 POST /api/v1/snapshot 等写操作
@@ -176,15 +214,28 @@ func (h *Handler) isAuthorized(r *http.Request) bool {
 // 因此永远不能用来直接调用 POST /api/v1/snapshot 或其他 Bearer 保护
 // 的 API。
 func (h *Handler) isSessionExchangeAuthorized(r *http.Request) bool {
+	return h.sessionExchangeScope(r) != ""
+}
+
+func (h *Handler) sessionExchangeScope(r *http.Request) string {
 	if h.isAuthorized(r) {
-		return true
+		return sessionScopeRead
 	}
 	// 空字符串表示未配置 Dashboard token；不能让它匹配到同样为空的
 	// Authorization header，否则未配置时反而放行了空 Bearer。
 	if h.dashboardToken == "" {
-		return false
+		if h.handoffToken != "" && matchesBearer(r, h.handoffToken) {
+			return sessionScopeHandoff
+		}
+		return ""
 	}
-	return matchesBearer(r, h.dashboardToken)
+	if matchesBearer(r, h.dashboardToken) {
+		return sessionScopeRead
+	}
+	if h.handoffToken != "" && matchesBearer(r, h.handoffToken) {
+		return sessionScopeHandoff
+	}
+	return ""
 }
 
 func matchesBearer(r *http.Request, want string) bool {
@@ -222,14 +273,15 @@ func (h *Handler) handleGate(w http.ResponseWriter, r *http.Request) {
 // expiry, never the presented token itself, so a leaked cookie cannot be
 // replayed as either credential.
 func (h *Handler) handlePostSession(w http.ResponseWriter, r *http.Request) {
-	if !h.isSessionExchangeAuthorized(r) {
+	scope := h.sessionExchangeScope(r)
+	if scope == "" {
 		h.rejectUnauthorized(w, r)
 		return
 	}
 	expiresAt := h.now().Add(sessionTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    signSessionValue(h.sessionKey, expiresAt),
+		Value:    signSessionValueScope(h.sessionKey, expiresAt, scope),
 		Path:     "/",
 		Expires:  expiresAt,
 		MaxAge:   int(sessionTTL.Seconds()),
@@ -238,6 +290,142 @@ func (h *Handler) handlePostSession(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) handlePostLarkHandoff(w http.ResponseWriter, r *http.Request) {
+	if h.handoffStore == nil {
+		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if !sameOriginHost(r) {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-Hermes-Action") != "lark-handoff" {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	sessionID := r.PathValue("session_id")
+	if !validSessionID(sessionID) {
+		http.Error(w, `{"error":"invalid session id"}`, http.StatusBadRequest)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	defer r.Body.Close()
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if !validUUID(body.IdempotencyKey) {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	_, snap, _, has := h.store.Get()
+	var profile string
+	var retryFailed bool
+	found := false
+	for _, s := range snap.Sessions {
+		if s.ID == sessionID {
+			found = true
+			profile = s.ProfileName
+			retryFailed = s.HandoffPlatform == handoffPlatformFeishu && s.HandoffState == handoffCommandStateFailed
+			break
+		}
+	}
+	if !has || !found {
+		http.Error(w, `{"error":"unknown session"}`, http.StatusNotFound)
+		return
+	}
+	result, err := h.handoffStore.Create(sessionID, profile, body.IdempotencyKey, retryFailed)
+	if err != nil {
+		h.logger.Error("handoff enqueue failed", slog.String("session_id", sessionID), slog.String("error_kind", "store"))
+		http.Error(w, `{"error":"handoff failed"}`, http.StatusInternalServerError)
+		return
+	}
+	h.logger.Info("handoff command enqueued", slog.String("session_id", sessionID), slog.String("command_id", result.Command.ID), slog.Bool("reused", result.Reused))
+	h.writeJSON(w, http.StatusOK, sanitizeHandoffCommand(result.Command))
+}
+
+func (h *Handler) handlePostHandoffClaim(w http.ResponseWriter, r *http.Request) {
+	if h.handoffStore == nil {
+		h.writeJSON(w, http.StatusOK, map[string]any{"command": nil})
+		return
+	}
+	cmd, ok, err := h.handoffStore.Claim()
+	if err != nil {
+		h.logger.Error("handoff claim failed", slog.String("error_kind", "store"))
+		http.Error(w, `{"error":"claim failed"}`, http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		h.writeJSON(w, http.StatusOK, map[string]any{"command": nil})
+		return
+	}
+	h.logger.Info("handoff command claimed", slog.String("session_id", cmd.SessionID), slog.String("command_id", cmd.ID))
+	h.writeJSON(w, http.StatusOK, map[string]any{"command": sanitizeHandoffCommand(cmd)})
+}
+
+func (h *Handler) handlePostHandoffResult(w http.ResponseWriter, r *http.Request) {
+	if h.handoffStore == nil {
+		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	defer r.Body.Close()
+	var body struct {
+		CommandID string `json:"command_id"`
+		Status    string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CommandID == "" {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	state := handoffCommandStateFailed
+	if body.Status == handoffCommandStateCompleted {
+		state = handoffCommandStateCompleted
+	}
+	cmd, err := h.handoffStore.Complete(body.CommandID, state)
+	if err != nil {
+		http.Error(w, `{"error":"unknown command"}`, http.StatusNotFound)
+		return
+	}
+	h.logger.Info("handoff command result", slog.String("session_id", cmd.SessionID), slog.String("command_id", cmd.ID), slog.String("status", state))
+	h.writeJSON(w, http.StatusOK, sanitizeHandoffCommand(cmd))
+}
+
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+
+func validSessionID(s string) bool { return sessionIDPattern.MatchString(s) }
+func validUUID(s string) bool      { return uuidPattern.MatchString(s) }
+
+func sameOriginHost(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	return err == nil && u.Host == r.Host && (u.Scheme == "https" || u.Scheme == "http")
+}
+
+func sanitizeHandoffCommand(cmd HandoffCommand) map[string]string {
+	return map[string]string{
+		"command_id":       cmd.ID,
+		"session_id":       cmd.SessionID,
+		"handoff_state":    cmd.State,
+		"handoff_platform": cmd.Platform,
+		"result_status":    cmd.ResultStatus,
+	}
 }
 
 // handleDashboardPage serves the real dashboard page. Reaching this handler
@@ -265,7 +453,30 @@ func (h *Handler) handleWorkbenchPage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
 	deviceID, snap, receivedAt, has := h.store.Get()
-	view := BuildDashboard(deviceID, snap, receivedAt, has, h.now())
+	view := BuildDashboardWithHandoff(deviceID, snap, receivedAt, has, h.now(), h.handoffToken != "")
+	if h.handoffStore != nil {
+		for i := range view.Sessions {
+			// state.db 一旦返回状态即为权威来源；在此之前保留 Relay 队列的
+			// 进行中状态，避免按钮短暂恢复可点击并诱发重复操作。
+			if view.Sessions[i].HandoffState != "" {
+				continue
+			}
+			cmd, ok, err := h.handoffStore.LatestForSession(view.Sessions[i].ID)
+			if err != nil {
+				h.logger.Error("handoff dashboard lookup failed", slog.String("error_kind", "store"))
+				break
+			}
+			if !ok {
+				continue
+			}
+			view.Sessions[i].HandoffPlatform = handoffPlatformFeishu
+			if cmd.State == handoffCommandStateFailed {
+				view.Sessions[i].HandoffState = handoffCommandStateFailed
+			} else {
+				view.Sessions[i].HandoffState = "pending"
+			}
+		}
+	}
 	h.writeJSON(w, http.StatusOK, view)
 }
 

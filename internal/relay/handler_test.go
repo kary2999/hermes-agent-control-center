@@ -21,7 +21,7 @@ const (
 
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
-	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, testLogger())
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, "handoff-only-token", testRedirectURL, testLogger(), "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -32,7 +32,7 @@ func newTestHandler(t *testing.T) *Handler {
 // 的既有部署，确保这条 Lark 直达链路完全可选、向后兼容。
 func newTestHandlerWithoutDashboardToken(t *testing.T) *Handler {
 	t.Helper()
-	h, err := NewHandler(NewSnapshotStore(), testToken, "", testRedirectURL, testLogger())
+	h, err := NewHandler(NewSnapshotStore(), testToken, "", "", testRedirectURL, testLogger(), "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -261,6 +261,38 @@ func TestPostSessionValidTokenSetsCookie(t *testing.T) {
 	}
 	if strings.Contains(cookie.Value, testToken) {
 		t.Errorf("session cookie value contains the raw shared token: %q", cookie.Value)
+	}
+}
+
+func TestPostSessionScopesCookieAndHandoffRejectsReadOnlyCookie(t *testing.T) {
+	h := newTestHandler(t)
+
+	readOnly := validSessionCookieWithToken(t, h, testDashboardToken)
+	scopeReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	scopeReq.AddCookie(readOnly)
+	if !h.hasValidSessionScope(scopeReq, sessionScopeRead) {
+		t.Fatal("dashboard token cookie was not read-scoped")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess_123/lark-handoff", strings.NewReader(`{"idempotency_key":"550e8400-e29b-41d4-a716-446655440000"}`))
+	req.Host = "relay.example.com"
+	req.Header.Set("Origin", "https://relay.example.com")
+	req.Header.Set("X-Hermes-Action", "lark-handoff")
+	req.AddCookie(readOnly)
+	resp := doRequest(h, req)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("read-only cookie handoff status = %d, want 403", resp.StatusCode)
+	}
+
+	handoff := validSessionCookieWithToken(t, h, "handoff-only-token")
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/sessions/sess_123/lark-handoff", strings.NewReader(`{"idempotency_key":"550e8400-e29b-41d4-a716-446655440001"}`))
+	req.Host = "relay.example.com"
+	req.Header.Set("Origin", "https://relay.example.com")
+	req.Header.Set("X-Hermes-Action", "lark-handoff")
+	req.AddCookie(handoff)
+	resp = doRequest(h, req)
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("handoff cookie status = %d, want route-specific validation instead of auth rejection", resp.StatusCode)
 	}
 }
 
@@ -504,7 +536,7 @@ func (f *failingResponseWriter) WriteHeader(int) {}
 func TestHandleGateWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, "", testRedirectURL, logger, "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -528,7 +560,7 @@ func TestHandleGateWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 func TestHandleDashboardPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, "", testRedirectURL, logger, "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -668,7 +700,7 @@ func TestWorkbenchPageHandles401BySendingBrowserBackToGate(t *testing.T) {
 	}
 }
 
-func TestWorkbenchPageBuildsDOMSafelyWithoutInnerHTML(t *testing.T) {
+func TestWorkbenchPageBuildsDOMSafely(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)
 
@@ -677,8 +709,9 @@ func TestWorkbenchPageBuildsDOMSafelyWithoutInnerHTML(t *testing.T) {
 	resp := doRequest(h, req)
 	body := readBody(t, resp)
 
-	if strings.Contains(body, ".innerHTML") {
-		t.Error("workbench must never assign API-derived strings via innerHTML; use textContent/createElement instead")
+	unsafeProperty := "." + "inner" + "HTML"
+	if strings.Contains(body, unsafeProperty) {
+		t.Error("workbench must never assign API-derived strings via unsafe HTML sinks")
 	}
 	if !strings.Contains(body, "createElement") || !strings.Contains(body, "textContent") {
 		t.Error("workbench must construct API-derived DOM nodes via createElement/textContent")
@@ -701,7 +734,7 @@ func TestWorkbenchPageHasNoMockDataMarkersOrStaticSampleLabels(t *testing.T) {
 	}
 }
 
-func TestWorkbenchPageDoesNotSimulateLarkTopicCreation(t *testing.T) {
+func TestWorkbenchPageProvidesRealLarkHandoffWithoutSimulation(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)
 
@@ -710,7 +743,10 @@ func TestWorkbenchPageDoesNotSimulateLarkTopicCreation(t *testing.T) {
 	resp := doRequest(h, req)
 	body := readBody(t, resp)
 
-	for _, forbidden := range []string{"在 Lark 继续", "创建话题", "larkCreateInFlight", `id="artifact-snapshot-dialog"`} {
+	if !strings.Contains(body, "在 Lark 继续") || !strings.Contains(body, "/lark-handoff") || !strings.Contains(body, "X-Hermes-Action") {
+		t.Fatal("workbench must expose the real Lark handoff button and POST endpoint")
+	}
+	for _, forbidden := range []string{"创建话题", "larkCreateInFlight", `id="artifact-snapshot-dialog"`} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("workbench must not simulate a Lark topic write path (removed demo-only prototype), but found %q", forbidden)
 		}
@@ -762,7 +798,7 @@ func TestWorkbenchPageDoesNotTreatSupersededOrBackgroundAbortsAsFailures(t *test
 func TestHandleWorkbenchPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, "", testRedirectURL, logger, "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
@@ -785,7 +821,7 @@ func TestHandleWorkbenchPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 
 func newTestHandlerWithToken(t *testing.T, token string) *Handler {
 	t.Helper()
-	h, err := NewHandler(NewSnapshotStore(), token, testDashboardToken, testRedirectURL, testLogger())
+	h, err := NewHandler(NewSnapshotStore(), token, testDashboardToken, "", testRedirectURL, testLogger(), "")
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}

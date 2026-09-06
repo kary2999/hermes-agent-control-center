@@ -22,6 +22,7 @@ func loadConfig() (connector.Config, error) {
 		Token:             os.Getenv("HERMES_RELAY_TOKEN"),
 		KanbanDBPath:      os.Getenv("HERMES_KANBAN_DB"),
 		HermesStateDBPath: os.Getenv("HERMES_STATE_DB"),
+		HandoffCommand:    os.Getenv("HERMES_HANDOFF_COMMAND"),
 		PollInterval:      defaultPollInterval,
 	}
 

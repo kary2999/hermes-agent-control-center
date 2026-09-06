@@ -608,6 +608,9 @@
     margin-bottom: 14px;
   }
   .detail-header h2 { margin: 0 0 4px; font-size: 17px; }
+  .handoff-action { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; flex-wrap: wrap; }
+  .handoff-action button { min-height: 36px; padding: 0 14px; }
+  .handoff-action .hint { color: var(--text-faint); font-size: 12px; }
 
   .back-to-list {
     display: none;
@@ -718,6 +721,9 @@
     <button class="nav-btn" type="button" data-nav="sessions">
       <span class="ico" aria-hidden="true">会</span> 会话
     </button>
+    <button class="nav-btn" type="button" data-nav="tasks">
+      <span class="ico" aria-hidden="true">任</span> 任务
+    </button>
     <button class="nav-btn" type="button" data-nav="resources">
       <span class="ico" aria-hidden="true">源</span> 资源
     </button>
@@ -743,8 +749,9 @@
           <div class="metric-value skel" id="metric-agents">&nbsp;</div>
         </div>
         <div class="card metric-card">
-          <div class="metric-label">进行中任务</div>
-          <div class="metric-value skel" id="metric-active-tasks">&nbsp;</div>
+          <div class="metric-label">任务总数</div>
+          <div class="metric-value skel" id="metric-total-tasks">&nbsp;</div>
+          <div class="metric-label" id="metric-active-tasks-sub"></div>
         </div>
         <div class="card metric-card">
           <div class="metric-label">最近完成任务</div>
@@ -793,14 +800,45 @@
       <div class="card">
         <table class="data-table">
           <thead>
-            <tr><th>负责 Agent</th><th>未完成任务数</th><th>运行中</th></tr>
+            <tr><th>模型</th><th>会话总数</th><th>进行中会话</th><th>输入 Token</th><th>输出 Token</th><th>缓存读取</th><th>缓存写入</th><th>推理 Token</th><th>Token 总计</th></tr>
           </thead>
           <tbody id="agents-tbody">
-            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
-            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
           </tbody>
         </table>
         <div class="record-cards" id="agents-cards">
+          <article class="record-card" data-skeleton="true" aria-hidden="true"><div class="rc-top"><span class="skel">&nbsp;</span></div></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 任务 ========== -->
+    <section class="page" id="page-tasks" data-page="tasks" hidden>
+      <div class="page-title">
+        <h1>任务</h1>
+        <span class="page-sub" id="tasks-count-sub"></span>
+      </div>
+
+      <div class="session-toolbar">
+        <div class="filter-pills" id="task-filter-pills" role="radiogroup" aria-label="按任务状态筛选">
+          <button type="button" class="filter-pill" role="radio" data-status="all" aria-checked="true">全部</button>
+          <button type="button" class="filter-pill" role="radio" data-status="active" aria-checked="false">进行中</button>
+          <button type="button" class="filter-pill" role="radio" data-status="completed" aria-checked="false">已完成</button>
+          <button type="button" class="filter-pill" role="radio" data-status="failed" aria-checked="false">失败</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr><th>任务</th><th>负责 Agent</th><th>状态</th><th>阶段</th><th>进度</th></tr>
+          </thead>
+          <tbody id="all-tasks-tbody">
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+          </tbody>
+        </table>
+        <div class="record-cards" id="all-tasks-cards">
           <article class="record-card" data-skeleton="true" aria-hidden="true"><div class="rc-top"><span class="skel">&nbsp;</span></div></article>
         </div>
       </div>
@@ -878,6 +916,9 @@
   <button class="bottom-nav-btn" type="button" data-nav="sessions">
     <span class="ico" aria-hidden="true">会</span>会话
   </button>
+  <button class="bottom-nav-btn" type="button" data-nav="tasks">
+    <span class="ico" aria-hidden="true">任</span>任务
+  </button>
   <button class="bottom-nav-btn" type="button" data-nav="resources">
     <span class="ico" aria-hidden="true">源</span>资源
   </button>
@@ -887,15 +928,11 @@
 (function () {
   "use strict";
 
-  // ---- 主题切换：默认跟随 prefers-color-scheme，显式选择后持久化到 localStorage ----
+  // ---- 主题切换：默认深色，显式选择后持久化到 localStorage ----
 
   var THEME_STORAGE_KEY = "hermes-workbench-theme";
   var themeToggleBtn = document.getElementById("theme-toggle");
   var themeToggleIcon = document.getElementById("theme-toggle-icon");
-
-  function systemPrefersDark() {
-    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  }
 
   function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
@@ -907,10 +944,12 @@
     if (themeToggleIcon) themeToggleIcon.textContent = isDark ? "☀️" : "🌙";
   }
 
+  // 无任何已保存的用户偏好时，默认使用深色主题（不再跟随
+  // prefers-color-scheme）；一旦用户显式切换过，则始终尊重该显式选择。
   function initTheme() {
     var stored = null;
     try { stored = window.localStorage.getItem(THEME_STORAGE_KEY); } catch (e) { /* 隐私模式等场景下忽略 */ }
-    var theme = (stored === "dark" || stored === "light") ? stored : (systemPrefersDark() ? "dark" : "light");
+    var theme = (stored === "dark" || stored === "light") ? stored : "dark";
     applyTheme(theme);
   }
 
@@ -950,8 +989,7 @@
   });
 
   // ---- DOM 构建小工具：一律通过 textContent / createElement 写入 API 返回的
-  // 字符串，绝不把它们拼进 innerHTML，避免任何字段（如任务标题、会话标题）
-  // 被当成 HTML 解析。 ----
+  // 字符串，避免任何字段（如任务标题、会话标题）被当成 HTML 解析。 ----
 
   function clearChildren(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
@@ -1045,6 +1083,7 @@
     d.agents = normalizeListField(d.agents);
     d.active_tasks = normalizeListField(d.active_tasks);
     d.recent_completed = normalizeListField(d.recent_completed);
+    d.all_tasks = normalizeListField(d.all_tasks);
     d.sessions = normalizeListField(d.sessions);
     return d;
   }
@@ -1054,6 +1093,7 @@
       Array.isArray(d.agents) &&
       Array.isArray(d.active_tasks) &&
       Array.isArray(d.recent_completed) &&
+      Array.isArray(d.all_tasks) &&
       Array.isArray(d.sessions) &&
       typeof d.has_snapshot === "boolean";
   }
@@ -1172,7 +1212,7 @@
     tasks.forEach(function (task) {
       var tr = makeEl("tr");
       tr.appendChild(makeEl("td", { text: task.title }));
-      tr.appendChild(makeEl("td", { text: task.assignee || "未分配" }));
+      tr.appendChild(makeEl("td", { text: task.responsible_agent || "暂无关联 Agent" }));
       tr.appendChild(makeEl("td", { text: task.stage }));
 
       var progressTd = makeEl("td");
@@ -1194,7 +1234,7 @@
       top.appendChild(pillEl(taskPillClass(task), task.status));
       card.appendChild(top);
       var dl = makeEl("dl");
-      [["负责 Agent", task.assignee || "未分配"], ["阶段", task.stage], ["进度", (task.progress_percent || 0) + "%"]].forEach(function (pair) {
+      [["负责 Agent", task.responsible_agent || "暂无关联 Agent"], ["阶段", task.stage], ["进度", (task.progress_percent || 0) + "%"]].forEach(function (pair) {
         dl.appendChild(makeEl("dt", { text: pair[0] }));
         dl.appendChild(makeEl("dd", { text: pair[1] }));
       });
@@ -1211,25 +1251,117 @@
     clearChildren(cards);
 
     if (agents.length === 0) {
-      var emptyTd = makeEl("td", { text: "暂无未完成任务分配给任何 Agent", attrs: { colspan: "3" } });
+      var emptyTd = makeEl("td", { text: "暂无模型会话数据", attrs: { colspan: "3" } });
       tbody.appendChild(makeEl("tr")).appendChild(emptyTd);
-      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无未完成任务分配给任何 Agent" }));
+      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无模型会话数据" }));
       return;
     }
 
     agents.forEach(function (agent) {
+      var tokenTotal = (agent.input_tokens || 0) + (agent.output_tokens || 0) +
+        (agent.cache_read_tokens || 0) + (agent.cache_write_tokens || 0) +
+        (agent.reasoning_tokens || 0);
       var tr = makeEl("tr");
-      tr.appendChild(makeEl("td", { text: agent.assignee }));
-      tr.appendChild(makeEl("td", { text: String(agent.unfinished_count) }));
-      tr.appendChild(makeEl("td", { text: String(agent.running_count) }));
+      tr.appendChild(makeEl("td", { text: agent.model }));
+      tr.appendChild(makeEl("td", { text: String(agent.total_session_count) }));
+      tr.appendChild(makeEl("td", { text: String(agent.active_session_count) }));
+      tr.appendChild(makeEl("td", { text: String(agent.input_tokens) }));
+      tr.appendChild(makeEl("td", { text: String(agent.output_tokens) }));
+      tr.appendChild(makeEl("td", { text: String(agent.cache_read_tokens) }));
+      tr.appendChild(makeEl("td", { text: String(agent.cache_write_tokens) }));
+      tr.appendChild(makeEl("td", { text: String(agent.reasoning_tokens) }));
+      tr.appendChild(makeEl("td", { text: String(tokenTotal) }));
       tbody.appendChild(tr);
 
       var card = makeEl("article", { className: "record-card" });
       var top = makeEl("div", { className: "rc-top" });
-      top.appendChild(makeEl("span", { className: "rc-title", text: agent.assignee }));
+      top.appendChild(makeEl("span", { className: "rc-title", text: agent.model }));
       card.appendChild(top);
       var dl = makeEl("dl");
-      [["未完成", String(agent.unfinished_count)], ["运行中", String(agent.running_count)]].forEach(function (pair) {
+      [
+        ["会话总数", String(agent.total_session_count)],
+        ["进行中会话", String(agent.active_session_count)],
+        ["输入 Token", String(agent.input_tokens)],
+        ["输出 Token", String(agent.output_tokens)],
+        ["缓存读取", String(agent.cache_read_tokens)],
+        ["缓存写入", String(agent.cache_write_tokens)],
+        ["推理 Token", String(agent.reasoning_tokens)],
+        ["Token 总计", String(tokenTotal)]
+      ].forEach(function (pair) {
+        dl.appendChild(makeEl("dt", { text: pair[0] }));
+        dl.appendChild(makeEl("dd", { text: pair[1] }));
+      });
+      card.appendChild(dl);
+      cards.appendChild(card);
+    });
+  }
+
+  var taskFilterPillsEl = document.getElementById("task-filter-pills");
+  var taskFilterPillBtns = taskFilterPillsEl ? taskFilterPillsEl.querySelectorAll(".filter-pill") : [];
+  var currentTaskStatusFilter = "all";
+  var currentAllTasks = [];
+
+  function isTaskCompleted(task) {
+    var s = (task.status || "").toLowerCase();
+    return s === "done" || s === "completed" || !!task.completed_at;
+  }
+
+  function isTaskFailed(task) {
+    var s = (task.status || "").toLowerCase();
+    return s === "failed" || s === "crashed" || s === "timed_out";
+  }
+
+  function matchesTaskStatusFilter(task) {
+    if (currentTaskStatusFilter === "all") return true;
+    if (currentTaskStatusFilter === "active") return !isTaskCompleted(task) && !isTaskFailed(task);
+    if (currentTaskStatusFilter === "completed") return isTaskCompleted(task) && !isTaskFailed(task);
+    if (currentTaskStatusFilter === "failed") return isTaskFailed(task);
+    return true;
+  }
+
+  function setTaskStatusFilter(status) {
+    currentTaskStatusFilter = status;
+    taskFilterPillBtns.forEach(function (btn) {
+      btn.setAttribute("aria-checked", btn.getAttribute("data-status") === status ? "true" : "false");
+    });
+    renderAllTasksTable(currentAllTasks);
+  }
+
+  taskFilterPillBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () { setTaskStatusFilter(btn.getAttribute("data-status")); });
+  });
+
+  function renderAllTasksTable(tasks) {
+    var tbody = document.getElementById("all-tasks-tbody");
+    var cards = document.getElementById("all-tasks-cards");
+    if (!tbody || !cards) return;
+    clearChildren(tbody);
+    clearChildren(cards);
+
+    var filtered = tasks.filter(matchesTaskStatusFilter);
+    if (filtered.length === 0) {
+      var emptyTd = makeEl("td", { text: "暂无匹配任务", attrs: { colspan: "5" } });
+      tbody.appendChild(makeEl("tr")).appendChild(emptyTd);
+      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无匹配任务" }));
+      return;
+    }
+
+    filtered.forEach(function (task) {
+      var tr = makeEl("tr");
+      tr.appendChild(makeEl("td", { text: task.title }));
+      tr.appendChild(makeEl("td", { text: task.responsible_agent || "暂无关联 Agent" }));
+      tr.appendChild(makeEl("td")).appendChild(pillEl(taskPillClass(task), task.status));
+      tr.appendChild(makeEl("td", { text: task.stage }));
+      tr.appendChild(makeEl("td", { text: String(task.progress_percent || 0) + "%" }));
+      tbody.appendChild(tr);
+
+      var card = makeEl("article", { className: "record-card" });
+      var top = makeEl("div", { className: "rc-top" });
+      top.appendChild(makeEl("span", { className: "rc-title", text: task.title }));
+      top.appendChild(pillEl(taskPillClass(task), task.status));
+      card.appendChild(top);
+      var dl = makeEl("dl");
+      [["负责 Agent", task.responsible_agent || "暂无关联 Agent"], ["阶段", task.stage], ["进度", String(task.progress_percent || 0) + "%"]].forEach(function (pair) {
         dl.appendChild(makeEl("dt", { text: pair[0] }));
         dl.appendChild(makeEl("dd", { text: pair[1] }));
       });
@@ -1247,31 +1379,42 @@
         typeLabel: "任务完成",
         statusLabel: "已完成",
         pillClass: "status-ok",
-        agent: task.assignee || "未分配",
+        agent: task.responsible_agent || "暂无关联 Agent",
         related: task.title,
         occurredAt: task.completed_at
+      });
+    });
+    data.all_tasks.forEach(function (task) {
+      if (!isTaskFailed(task)) return;
+      items.push({
+        typeLabel: "任务失败",
+        statusLabel: task.status,
+        pillClass: "status-warn",
+        agent: task.responsible_agent || "暂无关联 Agent",
+        related: task.title,
+        occurredAt: task.completed_at || task.started_at || task.created_at
       });
     });
     data.active_tasks.forEach(function (task) {
       if (!task.is_running) return;
       items.push({
-        typeLabel: "任务进行中",
+        typeLabel: "任务执行中",
         statusLabel: task.stage,
         pillClass: "status-running",
-        agent: task.assignee || "未分配",
+        agent: task.responsible_agent || "暂无关联 Agent",
         related: task.title,
         occurredAt: task.started_at || task.created_at
       });
     });
     data.sessions.forEach(function (session) {
-      if (!session.last_activity_at) return;
+      if (!session.last_user_prompt_at) return;
       items.push({
-        typeLabel: "会话活动",
+        typeLabel: "用户发送提示词",
         statusLabel: sessionStatusLabel(deriveSessionStatus(session)),
         pillClass: sessionPillClass(deriveSessionStatus(session)),
-        agent: "—",
-        related: session.title + "（会话 ID: " + session.id + "）",
-        occurredAt: session.last_activity_at
+        agent: session.model || "未知模型",
+        related: session.last_user_prompt || session.title,
+        occurredAt: session.last_user_prompt_at
       });
     });
     items.sort(function (a, b) {
@@ -1419,7 +1562,9 @@
     var q = (searchInput && searchInput.value || "").trim().toLowerCase();
     if (currentStatusFilter !== "all" && deriveSessionStatus(session) !== currentStatusFilter) return false;
     if (!q) return true;
-    return session.title.toLowerCase().indexOf(q) !== -1 || session.id.toLowerCase().indexOf(q) !== -1;
+    return session.title.toLowerCase().indexOf(q) !== -1 ||
+      session.id.toLowerCase().indexOf(q) !== -1 ||
+      (session.last_user_prompt || "").toLowerCase().indexOf(q) !== -1;
   }
 
   function renderSessionRow(session) {
@@ -1488,6 +1633,34 @@
     header.appendChild(pillEl(sessionPillClass(status), sessionStatusLabel(status)));
     detailEl.appendChild(header);
 
+    var action = makeEl("div", { className: "handoff-action" });
+    var actionButton = makeEl("button", { attrs: { type: "button" } });
+    var actionHint = makeEl("span", { className: "hint" });
+    var handoffState = session.handoff_state || "";
+    var handoffAvailable = !!(dashboardData && dashboardData.lark_handoff_available);
+    var disabled = false;
+    var label = "在 Lark 继续";
+    var hint = "";
+    if (!handoffAvailable) {
+      disabled = true;
+      hint = dashboardData && dashboardData.lark_handoff_reason || "当前不可用";
+    } else if (handoffState === "pending" || handoffState === "running" || handoffState === "queued") {
+      disabled = true;
+      label = "创建中";
+    } else if (handoffState === "completed" && session.handoff_platform === "feishu") {
+      label = "已创建";
+      hint = "已创建，可在 Lark 查看";
+    } else if (handoffState === "failed") {
+      label = "重试";
+    }
+    actionButton.textContent = label;
+    actionButton.disabled = disabled;
+    actionHint.textContent = hint;
+    actionButton.addEventListener("click", function () { requestLarkHandoff(session.id); });
+    action.appendChild(actionButton);
+    action.appendChild(actionHint);
+    detailEl.appendChild(action);
+
     var block = makeEl("section", { className: "detail-block" });
     block.appendChild(makeEl("h3", { text: "元数据" }));
     var dl = makeEl("dl", { className: "activity-fields" });
@@ -1505,8 +1678,11 @@
       ["缓存读取 Token", String(session.cache_read_tokens)],
       ["缓存写入 Token", String(session.cache_write_tokens)],
       ["推理 Token", String(session.reasoning_tokens)],
+      ["最新用户提示", session.last_user_prompt || "—"],
+      ["最新用户提示时间", session.last_user_prompt_at ? formatDateTime(session.last_user_prompt_at) : "—"],
       ["置顶", session.pinned ? "是" : "否"],
-      ["归档", session.archived ? "是" : "否"]
+      ["归档", session.archived ? "是" : "否"],
+      ["Lark 交接", dashboardData && dashboardData.lark_handoff_available ? "可用" : (dashboardData && dashboardData.lark_handoff_reason || "不可用")]
     ];
     fields.forEach(function (pair) {
       dl.appendChild(makeEl("dt", { text: pair[0] }));
@@ -1522,6 +1698,45 @@
     renderSessionDetail(session);
     renderSessionList();
     if (sessionPanelEl) sessionPanelEl.classList.add("is-detail-open");
+  }
+
+  function requestLarkHandoff(sessionId) {
+    if (!window.crypto || !window.crypto.randomUUID) {
+      showStatus("当前浏览器不支持创建请求。", true);
+      return;
+    }
+    fetch("/api/v1/sessions/" + encodeURIComponent(sessionId) + "/lark-handoff", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Hermes-Action": "lark-handoff"
+      },
+      body: JSON.stringify({ idempotency_key: window.crypto.randomUUID() })
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error("safe");
+      return resp.json();
+    }).then(function () {
+      showStatus("已提交创建请求。", false);
+      fetchDashboard();
+      startHandoffPolling();
+    }).catch(function () {
+      showStatus("创建失败，请稍后重试。", true);
+    });
+  }
+
+  var handoffPollTimer = null;
+  function startHandoffPolling() {
+    if (handoffPollTimer) window.clearInterval(handoffPollTimer);
+    var left = 12;
+    handoffPollTimer = window.setInterval(function () {
+      left -= 1;
+      fetchDashboard();
+      if (left <= 0) {
+        window.clearInterval(handoffPollTimer);
+        handoffPollTimer = null;
+      }
+    }, 2500);
   }
 
   // ---- 汇总渲染入口 ----
@@ -1543,14 +1758,16 @@
     }
 
     var metricAgents = document.getElementById("metric-agents");
-    var metricActiveTasks = document.getElementById("metric-active-tasks");
+    var metricTotalTasks = document.getElementById("metric-total-tasks");
+    var metricActiveTasksSub = document.getElementById("metric-active-tasks-sub");
     var metricRecentCompleted = document.getElementById("metric-recent-completed");
     var metricSessions = document.getElementById("metric-sessions");
     // 首次渲染真实数据时移除骨架占位类：class 只在还没拿到任何数据时挡住
     // 数字，一旦有真实计数（哪怕是 0）就必须可见，而不是被骨架样式的
     // color: transparent 一直盖住。
     if (metricAgents) { metricAgents.classList.remove("skel"); metricAgents.textContent = String(data.agents.length); }
-    if (metricActiveTasks) { metricActiveTasks.classList.remove("skel"); metricActiveTasks.textContent = String(data.active_tasks.length); }
+    if (metricTotalTasks) { metricTotalTasks.classList.remove("skel"); metricTotalTasks.textContent = String(data.all_tasks.length); }
+    if (metricActiveTasksSub) { metricActiveTasksSub.textContent = "进行中 " + String(data.active_tasks.length); }
     if (metricRecentCompleted) { metricRecentCompleted.classList.remove("skel"); metricRecentCompleted.textContent = String(data.recent_completed.length); }
     if (metricSessions) { metricSessions.classList.remove("skel"); metricSessions.textContent = String(data.sessions.length); }
 
@@ -1558,8 +1775,13 @@
     renderActivityFeed(buildRecentActivity(data));
 
     var agentsSub = document.getElementById("agents-count-sub");
-    if (agentsSub) agentsSub.textContent = "共 " + data.agents.length + " 个 Agent（按未完成任务分配统计）";
+    if (agentsSub) agentsSub.textContent = "共 " + data.agents.length + " 个 Agent（按模型统计）";
     renderAgentsTable(data.agents);
+
+    var tasksSub = document.getElementById("tasks-count-sub");
+    if (tasksSub) tasksSub.textContent = "共 " + data.all_tasks.length + " 个任务";
+    currentAllTasks = data.all_tasks;
+    renderAllTasksTable(currentAllTasks);
 
     var sessionsSub = document.getElementById("sessions-count-sub");
     if (sessionsSub) sessionsSub.textContent = "共 " + data.sessions.length + " 条会话";
