@@ -163,6 +163,12 @@ func TestGateContentSecurityPolicyFrameAncestorsSources(t *testing.T) {
 	if len(sources) != 2 {
 		t.Errorf("frame-ancestors has %d source(s), want exactly 2 (no other origins allowed): %v", len(sources), sources)
 	}
+	if scriptSrc := cspDirective(t, gateContentSecurityPolicy, "script-src"); !reflect.DeepEqual(scriptSrc, []string{"'unsafe-inline'"}) {
+		t.Errorf("script-src = %v, want only inline script for token exchange", scriptSrc)
+	}
+	if styleSrc := cspDirective(t, gateContentSecurityPolicy, "style-src"); !reflect.DeepEqual(styleSrc, []string{"'unsafe-inline'"}) {
+		t.Errorf("style-src = %v, want only inline styles so the gate renders inside Lark", styleSrc)
+	}
 }
 
 func TestHandleGateStaysOnSameOriginForManualAccess(t *testing.T) {

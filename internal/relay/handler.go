@@ -36,7 +36,7 @@ const maxSnapshotBodyBytes = 2 << 20 // 2 MiB
 // frame-ancestors 仅限定为 Lark 国际版（larksuite.com）和飞书中国版
 // （feishu.cn）的 AppLink 来源，因为 gate 页面是嵌在 Lark/飞书
 // 应用内浏览器 frame 中打开的；不允许其他任何来源对其进行 frame 嵌套。
-const gateContentSecurityPolicy = "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors https://*.larksuite.com https://*.feishu.cn"
+const gateContentSecurityPolicy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors https://*.larksuite.com https://*.feishu.cn"
 
 // Handler serves the Relay's HTTP API and embedded pages.
 type Handler struct {
