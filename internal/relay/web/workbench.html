@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes 控制中心 · 工作台</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #fafbfc;
+    --border: #e3e6ea;
+    --text: #1c2126;
+    --text-muted: #5b6470;
+    --text-faint: #8a93a0;
+    --brand: #2f6fed;
+    --brand-weak: #eaf1ff;
+    --ok: #16794e;
+    --ok-bg: #e7f7ef;
+    --warn: #9a6400;
+    --warn-bg: #fff3d9;
+    --danger: #b3261e;
+    --danger-bg: #fdecea;
+    --focus: #2f6fed;
+    --radius: 10px;
+    --gap: 16px;
+    --header-h: 56px;
+    --sidebar-w: 220px;
+    --bottomnav-h: 60px;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d0f11;
+    --surface: #17191c;
+    --surface-2: #1e2124;
+    --border: #2c3034;
+    --text: #f2f3f4;
+    --text-muted: #a8adb3;
+    --text-faint: #767c84;
+    --brand: #3fb37f;
+    --brand-weak: #16324f;
+    --ok: #3fb37f;
+    --ok-bg: #123024;
+    --warn: #d1a13a;
+    --warn-bg: #332a11;
+    --danger: #e0685f;
+    --danger-bg: #3a1a17;
+    --focus: #3fb37f;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]):not([data-theme="dark"]) {
+      color-scheme: dark;
+      --bg: #0d0f11;
+      --surface: #17191c;
+      --surface-2: #1e2124;
+      --border: #2c3034;
+      --text: #f2f3f4;
+      --text-muted: #a8adb3;
+      --text-faint: #767c84;
+      --brand: #3fb37f;
+      --brand-weak: #16324f;
+      --ok: #3fb37f;
+      --ok-bg: #123024;
+      --warn: #d1a13a;
+      --warn-bg: #332a11;
+      --danger: #e0685f;
+      --danger-bg: #3a1a17;
+      --focus: #3fb37f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .card, .nav-btn, .tab-btn, button, .session-row, .bottom-nav-btn {
+      transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  a, button, input, select, summary {
+    font: inherit;
+    color: inherit;
+  }
+
+  button { cursor: pointer; }
+
+  :focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: 8px; top: -48px;
+    background: var(--brand);
+    color: #fff;
+    padding: 10px 16px;
+    border-radius: 6px;
+    z-index: 100;
+  }
+  .skip-link:focus { top: 8px; }
+
+  /* ---------- App shell ---------- */
+
+  #app {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-rows: var(--header-h) 1fr;
+    grid-template-areas:
+      "sidebar header"
+      "sidebar main";
+  }
+
+  header.top-header {
+    grid-area: header;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+  }
+  .brand-mark {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    background: var(--brand);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .last-updated { color: var(--text-faint); font-size: 12.5px; white-space: nowrap; }
+
+  .theme-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 8px;
+    font-size: 16px;
+    flex: none;
+  }
+  .theme-toggle-btn:hover { background: var(--surface); }
+
+  nav.sidebar {
+    grid-area: sidebar;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .sidebar-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    padding: 8px 10px 4px;
+  }
+
+  .nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    text-align: left;
+    font-size: 14.5px;
+    color: var(--text-muted);
+  }
+  .nav-btn .ico {
+    width: 20px; height: 20px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    flex: none;
+  }
+  .nav-btn:hover { background: var(--surface-2); color: var(--text); }
+  .nav-btn[aria-current="page"] {
+    background: var(--brand-weak);
+    color: var(--brand);
+    font-weight: 600;
+  }
+  .nav-btn[aria-current="page"] .ico {
+    background: var(--brand);
+    color: #fff;
+    border-color: var(--brand);
+  }
+
+  main.content {
+    grid-area: main;
+    padding: 20px 24px 90px;
+    max-width: 1180px;
+    width: 100%;
+  }
+
+  .page[hidden] { display: none; }
+
+  .page-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .page-title h1 { font-size: 20px; margin: 0; }
+  .page-sub { color: var(--text-faint); font-size: 13px; }
+
+  /* ---------- Status banner ---------- */
+
+  .status-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 13.5px;
+    margin-bottom: var(--gap);
+    border: 1px solid transparent;
+  }
+  .status-banner[hidden] { display: none; }
+  .status-banner[data-state="loading"] { background: var(--brand-weak); color: var(--brand); }
+  .status-banner[data-state="stale"] { background: var(--warn-bg); color: var(--warn); border-color: #f0d999; }
+  .status-banner[data-state="error"] { background: var(--danger-bg); color: var(--danger); }
+  .status-retry-btn {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  /* ---------- Cards / grid ---------- */
+
+  .grid {
+    display: grid;
+    gap: var(--gap);
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    margin-bottom: var(--gap);
+  }
+  .two-col {
+    grid-template-columns: 1.4fr 1fr;
+  }
+  @media (max-width: 960px) {
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .card h2, .card h3 {
+    margin: 0 0 12px;
+    font-size: 15px;
+  }
+
+  .metric-card .metric-label {
+    color: var(--text-faint);
+    font-size: 12.5px;
+    margin-bottom: 6px;
+  }
+  .metric-card .metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  /* ---------- Status pills ---------- */
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.status-running { background: var(--brand-weak); color: var(--brand); }
+  .pill.status-ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.status-warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.status-error { background: var(--danger-bg); color: var(--danger); }
+  .pill.status-idle { background: var(--surface-2); color: var(--text-faint); }
+
+  /* ---------- Tables (desktop) / cards (mobile) ---------- */
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  table.data-table th, table.data-table td {
+    text-align: left;
+    padding: 10px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  table.data-table th {
+    color: var(--text-faint);
+    font-weight: 600;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  table.data-table tbody tr:hover { background: var(--surface-2); }
+
+  .progress-track {
+    width: 100%;
+    max-width: 120px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .progress-fill { height: 100%; background: var(--brand); border-radius: 3px; }
+
+  .record-cards { display: none; flex-direction: column; gap: 10px; }
+  .record-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+  .record-card .rc-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .record-card .rc-title { font-weight: 600; }
+  .record-card dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 10px;
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .record-card dt { color: var(--text-faint); }
+  .record-card dd { margin: 0; }
+
+  /* ---------- Activity feed ---------- */
+
+  .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .feed li { display: flex; }
+  .activity-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 44px;
+  }
+  .activity-row:hover { background: var(--surface-2); border-color: var(--border); }
+  .activity-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); margin-top: 6px; flex: none; }
+  .activity-row .body { flex: 1; }
+  .activity-row .time { color: var(--text-faint); font-size: 12px; }
+
+  .activity-detail-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.32);
+    z-index: 40;
+  }
+  .activity-detail-overlay.is-open { display: block; }
+
+  #activity-detail-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: min(420px, 100vw);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+    z-index: 41;
+    padding: 18px;
+    overflow-y: auto;
+    transform: translateX(100%);
+  }
+  #activity-detail-panel.is-open { transform: translateX(0); }
+  @media (prefers-reduced-motion: no-preference) {
+    #activity-detail-panel { transition: transform 160ms ease; }
+  }
+  @media (max-width: 720px) {
+    #activity-detail-panel { width: 100vw; }
+  }
+
+  #activity-detail-panel .detail-header h2 { font-size: 16px; }
+  #activity-detail-close {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+  }
+  .activity-fields { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; font-size: 13.5px; margin: 0; }
+  .activity-fields dt { color: var(--text-faint); }
+  .activity-fields dd { margin: 0; color: var(--text); }
+
+  /* ---------- Session page layout ---------- */
+
+  .session-layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: var(--gap);
+    align-items: start;
+  }
+  @media (max-width: 960px) {
+    .session-layout { grid-template-columns: 1fr; }
+  }
+
+  .session-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .session-toolbar input[type="search"] {
+    flex: 1;
+    min-width: 160px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+  }
+  .filter-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .filter-pill {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 13px;
+  }
+  .filter-pill[aria-checked="true"] {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: #fff;
+    font-weight: 600;
+  }
+  .filter-reset-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-decoration: underline;
+  }
+
+  .session-group-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    margin: 14px 0 8px;
+  }
+  .session-group-title:first-child { margin-top: 0; }
+
+  .session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .session-row {
+    width: 100%;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-height: 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .session-row:hover { background: var(--surface-2); }
+  .session-row[aria-current="true"] {
+    border-color: var(--brand);
+    border-left: 3px solid var(--brand);
+    background: var(--brand-weak);
+    box-shadow: 0 0 0 1px var(--brand) inset;
+  }
+  .session-row[aria-current="true"] .sr-title { color: var(--brand); }
+  .session-row .sr-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .session-row .sr-title { font-weight: 600; font-size: 13.5px; display: inline-flex; align-items: center; gap: 6px; }
+  .session-row .sr-meta { color: var(--text-faint); font-size: 12px; overflow-wrap: anywhere; }
+  .session-row .sr-sid { font-variant-numeric: tabular-nums; }
+  .pin-ico { font-size: 12px; }
+  .row-status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--text-faint);
+  }
+  .row-status-dot[data-status="active"] { background: var(--brand); }
+  .row-status-dot[data-status="completed"] { background: var(--ok); }
+  .row-status-dot[data-status="archived"] { background: var(--text-faint); }
+
+  .empty-state {
+    color: var(--text-faint);
+    padding: 24px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+  li.empty-state { list-style: none; }
+
+  .detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .detail-header h2 { margin: 0 0 4px; font-size: 17px; }
+
+  .back-to-list {
+    display: none;
+    margin-bottom: 12px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  section.detail-block { margin-bottom: 18px; }
+  section.detail-block h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    margin: 0 0 10px;
+  }
+
+  /* ---------- Bottom nav (mobile) ---------- */
+
+  .bottom-nav {
+    display: none;
+  }
+
+  /* ---------- Responsive: <=720px ---------- */
+  @media (max-width: 720px) {
+    #app {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "header"
+        "main";
+    }
+    nav.sidebar { display: none; }
+    main.content { padding: 14px 14px calc(var(--bottomnav-h) + 24px); }
+
+    table.data-table { display: none; }
+    .record-cards { display: flex; }
+
+    .session-layout { grid-template-columns: 1fr; }
+    .session-panel.is-detail-open .session-list-block { display: none; }
+    .session-panel:not(.is-detail-open) .session-detail-block { display: none; }
+    .back-to-list { display: inline-flex; align-items: center; }
+
+    .bottom-nav {
+      display: flex;
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: var(--bottomnav-h);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      z-index: 30;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .bottom-nav-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-height: 44px;
+      border: none;
+      background: transparent;
+      color: var(--text-faint);
+      font-size: 11px;
+    }
+    .bottom-nav-btn .ico {
+      width: 20px; height: 20px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+    }
+    .bottom-nav-btn[aria-current="page"] { color: var(--brand); font-weight: 600; }
+    .bottom-nav-btn[aria-current="page"] .ico { background: var(--brand); color: #fff; border-color: var(--brand); }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">跳到主要内容</a>
+
+<div id="app">
+  <header class="top-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">H</span>
+      <span>Hermes 控制中心</span>
+    </div>
+    <div class="header-right">
+      <span class="last-updated" id="last-updated"></span>
+      <span class="pill status-idle" id="connection-status" role="status">加载中</span>
+      <button id="theme-toggle" class="theme-toggle-btn" type="button" aria-pressed="false" aria-label="切换到深色主题">
+        <span id="theme-toggle-icon" aria-hidden="true">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="sidebar" aria-label="主导航">
+    <div class="sidebar-title">导航</div>
+    <button class="nav-btn" type="button" data-nav="overview" aria-current="page">
+      <span class="ico" aria-hidden="true">总</span> 总览
+    </button>
+    <button class="nav-btn" type="button" data-nav="agents">
+      <span class="ico" aria-hidden="true">A</span> Agent
+    </button>
+    <button class="nav-btn" type="button" data-nav="sessions">
+      <span class="ico" aria-hidden="true">会</span> 会话
+    </button>
+    <button class="nav-btn" type="button" data-nav="resources">
+      <span class="ico" aria-hidden="true">源</span> 资源
+    </button>
+  </nav>
+
+  <main class="content" id="main-content">
+
+    <div class="status-banner" id="status-banner" data-state="loading" role="status" hidden>
+      <span id="status-banner-text">正在加载数据…</span>
+      <button type="button" class="status-retry-btn" id="status-retry-btn" hidden>重试</button>
+    </div>
+
+    <!-- ========== 总览 ========== -->
+    <section class="page" id="page-overview" data-page="overview">
+      <div class="page-title">
+        <h1>总览</h1>
+        <span class="page-sub" id="overview-generated-at"></span>
+      </div>
+
+      <div class="grid metrics-grid">
+        <div class="card metric-card">
+          <div class="metric-label">Agent 数</div>
+          <div class="metric-value" id="metric-agents">—</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">进行中任务</div>
+          <div class="metric-value" id="metric-active-tasks">—</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">最近完成任务</div>
+          <div class="metric-value" id="metric-recent-completed">—</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-label">会话数</div>
+          <div class="metric-value" id="metric-sessions">—</div>
+        </div>
+      </div>
+
+      <div class="grid two-col">
+        <div class="card">
+          <h2>进行中任务</h2>
+          <table class="data-table">
+            <thead>
+              <tr><th>任务</th><th>负责 Agent</th><th>阶段</th><th>进度</th><th>状态</th></tr>
+            </thead>
+            <tbody id="active-tasks-tbody"></tbody>
+          </table>
+          <div class="record-cards" id="active-tasks-cards"></div>
+        </div>
+
+        <div class="card">
+          <h2>最近活动</h2>
+          <ul class="feed" id="activity-feed"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Agent ========== -->
+    <section class="page" id="page-agents" data-page="agents" hidden>
+      <div class="page-title">
+        <h1>Agent</h1>
+        <span class="page-sub" id="agents-count-sub"></span>
+      </div>
+
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr><th>负责 Agent</th><th>未完成任务数</th><th>运行中</th></tr>
+          </thead>
+          <tbody id="agents-tbody"></tbody>
+        </table>
+        <div class="record-cards" id="agents-cards"></div>
+      </div>
+    </section>
+
+    <!-- ========== 会话 ========== -->
+    <section class="page" id="page-sessions" data-page="sessions" hidden>
+      <div class="page-title">
+        <h1>会话</h1>
+        <span class="page-sub" id="sessions-count-sub"></span>
+      </div>
+
+      <div class="session-panel">
+        <div class="session-toolbar">
+          <label class="visually-hidden" for="session-search">按标题或编号搜索会话</label>
+          <input id="session-search" type="search" placeholder="搜索会话标题或编号…">
+        </div>
+        <div class="session-toolbar">
+          <div class="filter-pills" id="session-filter-pills" role="radiogroup" aria-label="按状态筛选">
+            <button type="button" class="filter-pill" role="radio" data-status="all" aria-checked="true">全部状态</button>
+            <button type="button" class="filter-pill" role="radio" data-status="active" aria-checked="false">进行中</button>
+            <button type="button" class="filter-pill" role="radio" data-status="completed" aria-checked="false">已完成</button>
+            <button type="button" class="filter-pill" role="radio" data-status="archived" aria-checked="false">已归档</button>
+          </div>
+          <button type="button" class="filter-reset-btn" id="session-filter-reset">重置筛选</button>
+        </div>
+
+        <div class="grid session-layout">
+          <div class="session-list-block">
+            <h3 class="session-group-title">置顶会话</h3>
+            <ul class="session-list" id="session-list-pinned" role="listbox" aria-label="置顶会话列表"></ul>
+
+            <h3 class="session-group-title">其他会话</h3>
+            <ul class="session-list" id="session-list-others" role="listbox" aria-label="其他会话列表"></ul>
+          </div>
+
+          <div class="session-detail-block">
+            <button class="back-to-list" id="back-to-list" type="button">← 返回会话列表</button>
+            <div class="card" id="session-detail"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 资源 ========== -->
+    <section class="page" id="page-resources" data-page="resources" hidden>
+      <div class="page-title">
+        <h1>资源</h1>
+      </div>
+      <div class="card">
+        <p>当前只读 API（GET /api/v1/dashboard）不提供资源数据：模型、技能、消息通道、定时任务均未开放查询，此页面不展示、也不推测任何相关信息。</p>
+        <p>会话与任务的写操作（包括创建或绑定 Lark 话题）在本工作台中同样不可用；工作台仅用于只读查看 Connector 上报的快照数据。</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="activity-detail-overlay" id="activity-detail-overlay"></div>
+<aside id="activity-detail-panel" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title" hidden>
+  <div class="detail-header">
+    <h2 id="activity-detail-title"></h2>
+    <button id="activity-detail-close" type="button">关闭</button>
+  </div>
+  <dl class="activity-fields" id="activity-detail-fields"></dl>
+</aside>
+
+<nav class="bottom-nav" aria-label="主导航（移动端）">
+  <button class="bottom-nav-btn" type="button" data-nav="overview" aria-current="page">
+    <span class="ico" aria-hidden="true">总</span>总览
+  </button>
+  <button class="bottom-nav-btn" type="button" data-nav="agents">
+    <span class="ico" aria-hidden="true">A</span>Agent
+  </button>
+  <button class="bottom-nav-btn" type="button" data-nav="sessions">
+    <span class="ico" aria-hidden="true">会</span>会话
+  </button>
+  <button class="bottom-nav-btn" type="button" data-nav="resources">
+    <span class="ico" aria-hidden="true">源</span>资源
+  </button>
+</nav>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- 主题切换：默认跟随 prefers-color-scheme，显式选择后持久化到 localStorage ----
+
+  var THEME_STORAGE_KEY = "hermes-workbench-theme";
+  var themeToggleBtn = document.getElementById("theme-toggle");
+  var themeToggleIcon = document.getElementById("theme-toggle-icon");
+
+  function systemPrefersDark() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    var isDark = theme === "dark";
+    if (themeToggleBtn) {
+      themeToggleBtn.setAttribute("aria-pressed", isDark ? "true" : "false");
+      themeToggleBtn.setAttribute("aria-label", isDark ? "切换到浅色主题" : "切换到深色主题");
+    }
+    if (themeToggleIcon) themeToggleIcon.textContent = isDark ? "☀️" : "🌙";
+  }
+
+  function initTheme() {
+    var stored = null;
+    try { stored = window.localStorage.getItem(THEME_STORAGE_KEY); } catch (e) { /* 隐私模式等场景下忽略 */ }
+    var theme = (stored === "dark" || stored === "light") ? stored : (systemPrefersDark() ? "dark" : "light");
+    applyTheme(theme);
+  }
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", function () {
+      var current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      var next = current === "dark" ? "light" : "dark";
+      applyTheme(next);
+      try { window.localStorage.setItem(THEME_STORAGE_KEY, next); } catch (e) { /* 隐私模式等场景下忽略 */ }
+    });
+  }
+
+  initTheme();
+
+  // ---- 主导航切换（桌面侧栏 + 移动端底部导航共用） ----
+
+  var pages = document.querySelectorAll(".page");
+  var navButtons = document.querySelectorAll("[data-nav]");
+
+  function activatePage(name) {
+    pages.forEach(function (p) {
+      p.hidden = p.getAttribute("data-page") !== name;
+    });
+    navButtons.forEach(function (btn) {
+      if (btn.getAttribute("data-nav") === name) {
+        btn.setAttribute("aria-current", "page");
+      } else {
+        btn.removeAttribute("aria-current");
+      }
+    });
+  }
+
+  navButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      activatePage(btn.getAttribute("data-nav"));
+    });
+  });
+
+  // ---- DOM 构建小工具：一律通过 textContent / createElement 写入 API 返回的
+  // 字符串，绝不把它们拼进 innerHTML，避免任何字段（如任务标题、会话标题）
+  // 被当成 HTML 解析。 ----
+
+  function clearChildren(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function makeEl(tag, opts) {
+    var e = document.createElement(tag);
+    opts = opts || {};
+    if (opts.className) e.className = opts.className;
+    if (opts.text !== undefined && opts.text !== null) e.textContent = opts.text;
+    if (opts.attrs) {
+      for (var k in opts.attrs) {
+        if (Object.prototype.hasOwnProperty.call(opts.attrs, k)) e.setAttribute(k, opts.attrs[k]);
+      }
+    }
+    return e;
+  }
+
+  function pillEl(className, text) {
+    return makeEl("span", { className: "pill " + className, text: text });
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "—";
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return "—";
+    function pad(n) { return n < 10 ? "0" + n : String(n); }
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  // ---- 数据获取：GET /api/v1/dashboard，同源凭证 + 超时中止 + 可见性感知轮询 ----
+
+  var API_URL = "/api/v1/dashboard";
+  var POLL_INTERVAL_MS = 15000;
+  var FETCH_TIMEOUT_MS = 9000;
+
+  var dashboardData = null;
+  var pollTimer = null;
+  var activeController = null;
+
+  var statusBannerEl = document.getElementById("status-banner");
+  var statusBannerTextEl = document.getElementById("status-banner-text");
+  var statusRetryBtn = document.getElementById("status-retry-btn");
+  var connectionStatusEl = document.getElementById("connection-status");
+  var lastUpdatedEl = document.getElementById("last-updated");
+
+  function setStatusBanner(state, message) {
+    if (!statusBannerEl) return;
+    if (state === "ok") {
+      statusBannerEl.hidden = true;
+      return;
+    }
+    statusBannerEl.hidden = false;
+    statusBannerEl.setAttribute("data-state", state);
+    if (statusBannerTextEl) statusBannerTextEl.textContent = message;
+    if (statusRetryBtn) statusRetryBtn.hidden = state !== "error";
+  }
+
+  function setConnectionBadge(state) {
+    if (!connectionStatusEl) return;
+    connectionStatusEl.classList.remove("status-ok", "status-warn", "status-error", "status-idle", "status-running");
+    var map = {
+      loading: ["status-running", "加载中"],
+      ok: ["status-ok", "已连接"],
+      stale: ["status-warn", "数据可能已过期"],
+      error: ["status-error", "连接失败"]
+    };
+    var entry = map[state] || map.loading;
+    connectionStatusEl.classList.add(entry[0]);
+    connectionStatusEl.textContent = entry[1];
+  }
+
+  function updateLastUpdated() {
+    if (!lastUpdatedEl) return;
+    lastUpdatedEl.textContent = dashboardData
+      ? "最近刷新：" + formatDateTime(new Date().toISOString())
+      : "";
+  }
+
+  function isValidDashboardPayload(d) {
+    return !!d && typeof d === "object" &&
+      Array.isArray(d.agents) &&
+      Array.isArray(d.active_tasks) &&
+      Array.isArray(d.recent_completed) &&
+      Array.isArray(d.sessions) &&
+      typeof d.has_snapshot === "boolean";
+  }
+
+  function schedulePoll() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    if (document.hidden) return; // 页面隐藏时停止轮询，避免后台无意义请求
+    pollTimer = setTimeout(function () { fetchDashboard(); }, POLL_INTERVAL_MS);
+  }
+
+  // abortIntentionally 标记一次主动中止（被新请求取代，或页面转入后台），
+  // 与请求自身的 9s 超时中止区分开：前者不是失败，不能触发 stale/error
+  // 提示，也不能由这次调用负责重新调度轮询——责任已经转移给取代它的调用者
+  // （新的 fetchDashboard() 调用，或重新可见时的 visibilitychange 处理器）。
+  function abortIntentionally(controller) {
+    controller.intentional = true;
+    controller.abort();
+  }
+
+  function fetchDashboard() {
+    // 中止上一个仍在进行中的请求，保证任意时刻最多一个 in-flight 请求。
+    if (activeController) {
+      abortIntentionally(activeController);
+      activeController = null;
+    }
+    var controller = new AbortController();
+    controller.intentional = false;
+    activeController = controller;
+    var timeoutId = setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS);
+
+    if (!dashboardData) setStatusBanner("loading", "正在加载数据…");
+    setConnectionBadge("loading");
+
+    fetch(API_URL, { credentials: "same-origin", signal: controller.signal })
+      .then(function (res) {
+        clearTimeout(timeoutId);
+        if (res.status === 401) {
+          window.location.replace("/");
+          return null;
+        }
+        if (!res.ok) {
+          throw new Error("unexpected_status");
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        if (data === null) return; // 401 分支已跳转，无需继续处理
+        if (!isValidDashboardPayload(data)) {
+          throw new Error("invalid_payload");
+        }
+        dashboardData = data;
+        renderAll();
+        setStatusBanner("ok");
+        setConnectionBadge("ok");
+        updateLastUpdated();
+      })
+      .catch(function () {
+        clearTimeout(timeoutId);
+        if (controller.intentional) return; // 被取代或页面隐藏，不代表真实失败
+        if (dashboardData) {
+          setStatusBanner("stale", "刷新失败，当前显示的是最近一次成功获取的数据");
+          setConnectionBadge("stale");
+        } else {
+          setStatusBanner("error", "无法加载工作台数据，请稍后重试");
+          setConnectionBadge("error");
+        }
+      })
+      .finally(function () {
+        if (activeController === controller) activeController = null;
+        if (controller.intentional) return; // 调度职责已转移给取代它的调用者
+        schedulePoll();
+      });
+  }
+
+  if (statusRetryBtn) {
+    statusRetryBtn.addEventListener("click", function () { fetchDashboard(); });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (activeController) { abortIntentionally(activeController); activeController = null; }
+    } else {
+      fetchDashboard();
+    }
+  });
+
+  // ---- 总览 / Agent / 任务 渲染 ----
+
+  function taskPillClass(task) {
+    if (task.is_running) return "status-running";
+    var s = (task.status || "").toLowerCase();
+    if (s === "done" || s === "completed") return "status-ok";
+    if (s === "blocked" || s === "crashed" || s === "failed" || s === "timed_out") return "status-warn";
+    return "status-idle";
+  }
+
+  function renderActiveTasksTable(tasks) {
+    var tbody = document.getElementById("active-tasks-tbody");
+    var cards = document.getElementById("active-tasks-cards");
+    if (!tbody || !cards) return;
+    clearChildren(tbody);
+    clearChildren(cards);
+
+    if (tasks.length === 0) {
+      var emptyTd = makeEl("td", { text: "暂无进行中任务", attrs: { colspan: "5" } });
+      tbody.appendChild(makeEl("tr")).appendChild(emptyTd);
+      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无进行中任务" }));
+      return;
+    }
+
+    tasks.forEach(function (task) {
+      var tr = makeEl("tr");
+      tr.appendChild(makeEl("td", { text: task.title }));
+      tr.appendChild(makeEl("td", { text: task.assignee || "未分配" }));
+      tr.appendChild(makeEl("td", { text: task.stage }));
+
+      var progressTd = makeEl("td");
+      var track = makeEl("div", { className: "progress-track" });
+      var fill = makeEl("div", { className: "progress-fill" });
+      fill.style.width = Math.max(0, Math.min(100, task.progress_percent || 0)) + "%";
+      track.appendChild(fill);
+      progressTd.appendChild(track);
+      tr.appendChild(progressTd);
+
+      var statusTd = makeEl("td");
+      statusTd.appendChild(pillEl(taskPillClass(task), task.status));
+      tr.appendChild(statusTd);
+      tbody.appendChild(tr);
+
+      var card = makeEl("article", { className: "record-card" });
+      var top = makeEl("div", { className: "rc-top" });
+      top.appendChild(makeEl("span", { className: "rc-title", text: task.title }));
+      top.appendChild(pillEl(taskPillClass(task), task.status));
+      card.appendChild(top);
+      var dl = makeEl("dl");
+      [["负责 Agent", task.assignee || "未分配"], ["阶段", task.stage], ["进度", (task.progress_percent || 0) + "%"]].forEach(function (pair) {
+        dl.appendChild(makeEl("dt", { text: pair[0] }));
+        dl.appendChild(makeEl("dd", { text: pair[1] }));
+      });
+      card.appendChild(dl);
+      cards.appendChild(card);
+    });
+  }
+
+  function renderAgentsTable(agents) {
+    var tbody = document.getElementById("agents-tbody");
+    var cards = document.getElementById("agents-cards");
+    if (!tbody || !cards) return;
+    clearChildren(tbody);
+    clearChildren(cards);
+
+    if (agents.length === 0) {
+      var emptyTd = makeEl("td", { text: "暂无未完成任务分配给任何 Agent", attrs: { colspan: "3" } });
+      tbody.appendChild(makeEl("tr")).appendChild(emptyTd);
+      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无未完成任务分配给任何 Agent" }));
+      return;
+    }
+
+    agents.forEach(function (agent) {
+      var tr = makeEl("tr");
+      tr.appendChild(makeEl("td", { text: agent.assignee }));
+      tr.appendChild(makeEl("td", { text: String(agent.unfinished_count) }));
+      tr.appendChild(makeEl("td", { text: String(agent.running_count) }));
+      tbody.appendChild(tr);
+
+      var card = makeEl("article", { className: "record-card" });
+      var top = makeEl("div", { className: "rc-top" });
+      top.appendChild(makeEl("span", { className: "rc-title", text: agent.assignee }));
+      card.appendChild(top);
+      var dl = makeEl("dl");
+      [["未完成", String(agent.unfinished_count)], ["运行中", String(agent.running_count)]].forEach(function (pair) {
+        dl.appendChild(makeEl("dt", { text: pair[0] }));
+        dl.appendChild(makeEl("dd", { text: pair[1] }));
+      });
+      card.appendChild(dl);
+      cards.appendChild(card);
+    });
+  }
+
+  // ---- 最近活动：由任务与会话的安全元数据在浏览器本地推导，不调用生成式摘要 ----
+
+  function buildRecentActivity(data) {
+    var items = [];
+    data.recent_completed.forEach(function (task) {
+      items.push({
+        typeLabel: "任务完成",
+        statusLabel: "已完成",
+        pillClass: "status-ok",
+        agent: task.assignee || "未分配",
+        related: task.title,
+        occurredAt: task.completed_at
+      });
+    });
+    data.active_tasks.forEach(function (task) {
+      if (!task.is_running) return;
+      items.push({
+        typeLabel: "任务进行中",
+        statusLabel: task.stage,
+        pillClass: "status-running",
+        agent: task.assignee || "未分配",
+        related: task.title,
+        occurredAt: task.started_at || task.created_at
+      });
+    });
+    data.sessions.forEach(function (session) {
+      if (!session.last_activity_at) return;
+      items.push({
+        typeLabel: "会话活动",
+        statusLabel: sessionStatusLabel(deriveSessionStatus(session)),
+        pillClass: sessionPillClass(deriveSessionStatus(session)),
+        agent: "—",
+        related: session.title + "（会话 ID: " + session.id + "）",
+        occurredAt: session.last_activity_at
+      });
+    });
+    items.sort(function (a, b) {
+      var ta = a.occurredAt ? new Date(a.occurredAt).getTime() : 0;
+      var tb = b.occurredAt ? new Date(b.occurredAt).getTime() : 0;
+      return tb - ta;
+    });
+    return items.slice(0, 20);
+  }
+
+  var activityFeedEl = document.getElementById("activity-feed");
+  var activityOverlayEl = document.getElementById("activity-detail-overlay");
+  var activityPanelEl = document.getElementById("activity-detail-panel");
+  var activityTitleEl = document.getElementById("activity-detail-title");
+  var activityFieldsEl = document.getElementById("activity-detail-fields");
+  var activityCloseBtn = document.getElementById("activity-detail-close");
+  var activityLastTrigger = null;
+
+  function renderActivityFeed(activities) {
+    if (!activityFeedEl) return;
+    clearChildren(activityFeedEl);
+    if (activities.length === 0) {
+      var li = makeEl("li", { className: "empty-state", text: "暂无可展示的活动" });
+      activityFeedEl.appendChild(li);
+      return;
+    }
+    activities.forEach(function (activity) {
+      var li = makeEl("li");
+      var btn = makeEl("button", { className: "activity-row", attrs: { type: "button", "aria-haspopup": "dialog" } });
+      btn.appendChild(makeEl("span", { className: "dot", attrs: { "aria-hidden": "true" } }));
+      var body = makeEl("span", { className: "body" });
+      var line1 = makeEl("div");
+      line1.appendChild(document.createTextNode(activity.typeLabel + "（" + activity.agent + "）· "));
+      line1.appendChild(pillEl(activity.pillClass, activity.statusLabel));
+      body.appendChild(line1);
+      body.appendChild(makeEl("div", { className: "time", text: formatDateTime(activity.occurredAt) }));
+      btn.appendChild(body);
+      btn.addEventListener("click", function () { openActivityDetail(activity, btn); });
+      li.appendChild(btn);
+      activityFeedEl.appendChild(li);
+    });
+  }
+
+  function openActivityDetail(activity, triggerEl) {
+    activityLastTrigger = triggerEl || null;
+    if (activityTitleEl) activityTitleEl.textContent = activity.typeLabel;
+    if (activityFieldsEl) {
+      clearChildren(activityFieldsEl);
+      var rows = [
+        ["状态", activity.statusLabel],
+        ["负责 Agent", activity.agent],
+        ["关联对象", activity.related],
+        ["时间戳", formatDateTime(activity.occurredAt)]
+      ];
+      rows.forEach(function (pair) {
+        activityFieldsEl.appendChild(makeEl("dt", { text: pair[0] }));
+        activityFieldsEl.appendChild(makeEl("dd", { text: pair[1] }));
+      });
+    }
+    if (activityPanelEl) {
+      activityPanelEl.hidden = false;
+      requestAnimationFrame(function () { activityPanelEl.classList.add("is-open"); });
+    }
+    if (activityOverlayEl) activityOverlayEl.classList.add("is-open");
+    if (activityCloseBtn) activityCloseBtn.focus();
+  }
+
+  function closeActivityDetail() {
+    if (activityPanelEl) {
+      activityPanelEl.classList.remove("is-open");
+      activityPanelEl.hidden = true;
+    }
+    if (activityOverlayEl) activityOverlayEl.classList.remove("is-open");
+    if (activityLastTrigger) activityLastTrigger.focus();
+  }
+
+  if (activityCloseBtn) activityCloseBtn.addEventListener("click", closeActivityDetail);
+  if (activityOverlayEl) activityOverlayEl.addEventListener("click", closeActivityDetail);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && activityPanelEl && !activityPanelEl.hidden) closeActivityDetail();
+  });
+
+  // ---- 会话状态推导：archived 优先；无 ended_at 视为进行中；否则视为已完成 ----
+
+  function deriveSessionStatus(session) {
+    if (session.archived) return "archived";
+    if (!session.ended_at) return "active";
+    return "completed";
+  }
+
+  function sessionStatusLabel(status) {
+    return { active: "进行中", completed: "已完成", archived: "已归档" }[status] || status;
+  }
+
+  function sessionPillClass(status) {
+    return { active: "status-running", completed: "status-ok", archived: "status-idle" }[status] || "status-idle";
+  }
+
+  // ---- 会话搜索 / 筛选 / 详情 ----
+
+  var listElPinned = document.getElementById("session-list-pinned");
+  var listElOthers = document.getElementById("session-list-others");
+  var detailEl = document.getElementById("session-detail");
+  var searchInput = document.getElementById("session-search");
+  var filterPillsEl = document.getElementById("session-filter-pills");
+  var filterPillBtns = filterPillsEl ? filterPillsEl.querySelectorAll(".filter-pill") : [];
+  var filterResetBtn = document.getElementById("session-filter-reset");
+  var backBtn = document.getElementById("back-to-list");
+  var sessionPanelEl = document.querySelector(".session-panel");
+
+  var activeSessionId = null;
+  var currentStatusFilter = "all";
+  var currentSessions = [];
+
+  function setStatusFilter(status) {
+    currentStatusFilter = status;
+    filterPillBtns.forEach(function (btn) {
+      btn.setAttribute("aria-checked", btn.getAttribute("data-status") === status ? "true" : "false");
+    });
+    renderSessionList();
+  }
+
+  filterPillBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () { setStatusFilter(btn.getAttribute("data-status")); });
+  });
+
+  if (filterResetBtn) {
+    filterResetBtn.addEventListener("click", function () {
+      if (searchInput) searchInput.value = "";
+      setStatusFilter("all");
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", function () { renderSessionList(); });
+  }
+
+  if (backBtn && sessionPanelEl) {
+    backBtn.addEventListener("click", function () {
+      sessionPanelEl.classList.remove("is-detail-open");
+    });
+  }
+
+  function matchesFilters(session) {
+    var q = (searchInput && searchInput.value || "").trim().toLowerCase();
+    if (currentStatusFilter !== "all" && deriveSessionStatus(session) !== currentStatusFilter) return false;
+    if (!q) return true;
+    return session.title.toLowerCase().indexOf(q) !== -1 || session.id.toLowerCase().indexOf(q) !== -1;
+  }
+
+  function renderSessionRow(session) {
+    var li = makeEl("li", { attrs: { role: "presentation" } });
+    var status = deriveSessionStatus(session);
+
+    var btn = makeEl("button", { className: "session-row", attrs: { type: "button", role: "option", "aria-current": String(session.id === activeSessionId) } });
+
+    var top = makeEl("span", { className: "sr-top" });
+    var titleSpan = makeEl("span", { className: "sr-title" });
+    if (session.pinned) {
+      titleSpan.appendChild(makeEl("span", { className: "pin-ico", text: "📌", attrs: { title: "已置顶", "aria-hidden": "true" } }));
+    } else {
+      titleSpan.appendChild(makeEl("span", { className: "row-status-dot", attrs: { "data-status": status, "aria-hidden": "true" } }));
+    }
+    titleSpan.appendChild(document.createTextNode(session.title));
+    top.appendChild(titleSpan);
+    top.appendChild(pillEl(sessionPillClass(status), sessionStatusLabel(status)));
+    btn.appendChild(top);
+
+    var meta = makeEl("span", { className: "sr-meta" });
+    meta.appendChild(makeEl("span", { className: "sr-sid", text: "会话 ID: " + session.id }));
+    meta.appendChild(document.createTextNode(
+      " · " + session.model + " · " + session.message_count + " 条消息 · " +
+      session.tool_call_count + " 次工具调用 · " + formatDateTime(session.last_activity_at || session.started_at)
+    ));
+    btn.appendChild(meta);
+
+    btn.addEventListener("click", function () { selectSession(session.id); });
+    li.appendChild(btn);
+    return li;
+  }
+
+  function renderGroup(container, sessions, emptyText) {
+    if (!container) return;
+    clearChildren(container);
+    if (sessions.length === 0) {
+      container.appendChild(makeEl("li", { className: "empty-state", text: emptyText }));
+      return;
+    }
+    sessions.forEach(function (session) { container.appendChild(renderSessionRow(session)); });
+  }
+
+  function renderSessionList() {
+    var filtered = currentSessions.filter(matchesFilters);
+    var pinned = filtered.filter(function (s) { return s.pinned; });
+    var others = filtered.filter(function (s) { return !s.pinned; });
+    renderGroup(listElPinned, pinned, "没有匹配的置顶会话");
+    renderGroup(listElOthers, others, "没有匹配的会话");
+  }
+
+  function renderSessionDetail(session) {
+    if (!detailEl) return;
+    clearChildren(detailEl);
+    if (!session) {
+      detailEl.appendChild(makeEl("p", { className: "empty-state", text: "从左侧列表选择一条会话查看详情" }));
+      return;
+    }
+
+    var status = deriveSessionStatus(session);
+    var header = makeEl("div", { className: "detail-header" });
+    var headerLeft = makeEl("div");
+    headerLeft.appendChild(makeEl("h2", { text: session.title }));
+    headerLeft.appendChild(makeEl("div", { className: "page-sub", text: "会话 ID: " + session.id }));
+    header.appendChild(headerLeft);
+    header.appendChild(pillEl(sessionPillClass(status), sessionStatusLabel(status)));
+    detailEl.appendChild(header);
+
+    var block = makeEl("section", { className: "detail-block" });
+    block.appendChild(makeEl("h3", { text: "元数据" }));
+    var dl = makeEl("dl", { className: "activity-fields" });
+    var fields = [
+      ["来源", session.source],
+      ["模型", session.model],
+      ["Profile", session.profile_name],
+      ["开始时间", formatDateTime(session.started_at)],
+      ["结束时间", session.ended_at ? formatDateTime(session.ended_at) : "—"],
+      ["最后活动时间", session.last_activity_at ? formatDateTime(session.last_activity_at) : "—"],
+      ["消息数", String(session.message_count)],
+      ["工具调用次数", String(session.tool_call_count)],
+      ["输入 Token", String(session.input_tokens)],
+      ["输出 Token", String(session.output_tokens)],
+      ["缓存读取 Token", String(session.cache_read_tokens)],
+      ["缓存写入 Token", String(session.cache_write_tokens)],
+      ["推理 Token", String(session.reasoning_tokens)],
+      ["置顶", session.pinned ? "是" : "否"],
+      ["归档", session.archived ? "是" : "否"]
+    ];
+    fields.forEach(function (pair) {
+      dl.appendChild(makeEl("dt", { text: pair[0] }));
+      dl.appendChild(makeEl("dd", { text: pair[1] }));
+    });
+    block.appendChild(dl);
+    detailEl.appendChild(block);
+  }
+
+  function selectSession(sessionId) {
+    activeSessionId = sessionId;
+    var session = currentSessions.filter(function (s) { return s.id === sessionId; })[0] || null;
+    renderSessionDetail(session);
+    renderSessionList();
+    if (sessionPanelEl) sessionPanelEl.classList.add("is-detail-open");
+  }
+
+  // ---- 汇总渲染入口 ----
+
+  function renderAll() {
+    var data = dashboardData;
+    if (!data) return;
+
+    var genAtEl = document.getElementById("overview-generated-at");
+    if (genAtEl) {
+      if (data.has_snapshot) {
+        genAtEl.textContent = "设备 " + (data.device_id || "—") +
+          " · 快照采集于 " + formatDateTime(data.snapshot_taken_at) +
+          " · 中继接收于 " + formatDateTime(data.snapshot_received_at) +
+          " · 页面生成于 " + formatDateTime(data.generated_at);
+      } else {
+        genAtEl.textContent = "尚未收到任何 Connector 快照数据";
+      }
+    }
+
+    var metricAgents = document.getElementById("metric-agents");
+    var metricActiveTasks = document.getElementById("metric-active-tasks");
+    var metricRecentCompleted = document.getElementById("metric-recent-completed");
+    var metricSessions = document.getElementById("metric-sessions");
+    if (metricAgents) metricAgents.textContent = String(data.agents.length);
+    if (metricActiveTasks) metricActiveTasks.textContent = String(data.active_tasks.length);
+    if (metricRecentCompleted) metricRecentCompleted.textContent = String(data.recent_completed.length);
+    if (metricSessions) metricSessions.textContent = String(data.sessions.length);
+
+    renderActiveTasksTable(data.active_tasks);
+    renderActivityFeed(buildRecentActivity(data));
+
+    var agentsSub = document.getElementById("agents-count-sub");
+    if (agentsSub) agentsSub.textContent = "共 " + data.agents.length + " 个 Agent（按未完成任务分配统计）";
+    renderAgentsTable(data.agents);
+
+    var sessionsSub = document.getElementById("sessions-count-sub");
+    if (sessionsSub) sessionsSub.textContent = "共 " + data.sessions.length + " 条会话";
+    currentSessions = data.sessions;
+    if (activeSessionId && !currentSessions.some(function (s) { return s.id === activeSessionId; })) {
+      activeSessionId = null;
+    }
+    renderSessionList();
+    renderSessionDetail(currentSessions.filter(function (s) { return s.id === activeSessionId; })[0] || null);
+  }
+
+  // ---- 启动 ----
+
+  fetchDashboard();
+})();
+</script>
+</body>
+</html>
