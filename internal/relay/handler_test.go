@@ -190,7 +190,7 @@ func TestHandleGateEmbedsConfiguredRedirectAndFallbackFlow(t *testing.T) {
 	}
 }
 
-func TestHandleGateRedirectsToDemoV2WithValidSession(t *testing.T) {
+func TestHandleGateRedirectsToWorkbenchWithValidSession(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)
 
@@ -201,19 +201,19 @@ func TestHandleGateRedirectsToDemoV2WithValidSession(t *testing.T) {
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/demo-v2" {
-		t.Errorf("Location = %q, want %q", loc, "/demo-v2")
+	if loc := resp.Header.Get("Location"); loc != "/workbench" {
+		t.Errorf("Location = %q, want %q", loc, "/workbench")
 	}
 }
 
-func TestHandleGateSuccessfulTokenExchangeScriptRedirectsToDemoV2(t *testing.T) {
+func TestHandleGateSuccessfulTokenExchangeScriptRedirectsToWorkbench(t *testing.T) {
 	h := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	resp := doRequest(h, req)
 	body := readBody(t, resp)
 
-	if !strings.Contains(body, "window.location.replace('/demo-v2')") {
-		t.Error("gate page script must redirect a successful token exchange to /demo-v2")
+	if !strings.Contains(body, "window.location.replace('/workbench')") {
+		t.Error("gate page script must redirect a successful token exchange to /workbench")
 	}
 	if strings.Contains(body, "window.location.replace('/dashboard')") {
 		t.Error("gate page script must not redirect a successful token exchange to /dashboard")
@@ -549,9 +549,9 @@ func TestHandleDashboardPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	}
 }
 
-// --- 7. GET /demo-v2 session protection (UI-only mock demo, no live data) ---
+// --- 7. GET /workbench session protection (live-data workbench) ---
 
-func TestDemoV2PageRejectsMissingOrForgedSession(t *testing.T) {
+func TestWorkbenchPageRejectsMissingOrForgedSession(t *testing.T) {
 	h := newTestHandler(t)
 
 	tamperedCookie := validSessionCookie(t, h)
@@ -568,7 +568,7 @@ func TestDemoV2PageRejectsMissingOrForgedSession(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
+			req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
 			if tc.cookie != nil {
 				req.AddCookie(tc.cookie)
 			}
@@ -584,37 +584,182 @@ func TestDemoV2PageRejectsMissingOrForgedSession(t *testing.T) {
 	}
 }
 
-func TestDemoV2PageServesContentWithValidSession(t *testing.T) {
+func TestWorkbenchPageServesContentWithValidSessionAndFetchesLiveDashboardAPI(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)
 
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
 	req.AddCookie(cookie)
 	resp := doRequest(h, req)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
 	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control = %q, want %q", cc, "no-store")
 	}
 
 	body := readBody(t, resp)
-	if !strings.Contains(body, "演示数据") && !strings.Contains(body, "演示數據") {
-		t.Error("demo-v2 page must carry an obvious 演示数据 (mock data) marker")
+	if !strings.Contains(body, "/api/v1/dashboard") {
+		t.Error("workbench page must fetch the live GET /api/v1/dashboard API")
 	}
-	if strings.Contains(body, "fetch(") {
-		t.Error("demo-v2 page must be a static mock with zero network requests")
-	}
-	if strings.Contains(body, "XMLHttpRequest") {
-		t.Error("demo-v2 page must be a static mock with zero network requests")
-	}
-	if strings.Contains(body, "/api/v1/") {
-		t.Error("demo-v2 page must never reference live Hermes API endpoints")
+	if strings.Contains(body, "window.prompt") {
+		t.Error("workbench page must not prompt for a shared token")
 	}
 }
 
-func TestHandleDemoV2PageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
+func TestWorkbenchPageFetchUsesAbortControllerWithTimeout(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "new AbortController()") {
+		t.Error("workbench fetch must use an AbortController so a hung request can be aborted")
+	}
+	if !strings.Contains(body, "signal: controller.signal") {
+		t.Error("workbench fetch must pass the AbortController's signal into the fetch() call")
+	}
+	if !strings.Contains(body, "FETCH_TIMEOUT_MS") || !strings.Contains(body, "controller.abort()") {
+		t.Error("workbench fetch must abort itself after a bounded timeout, not hang indefinitely")
+	}
+}
+
+func TestWorkbenchPagePollsEvery15SecondsAndPausesWhenHidden(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "POLL_INTERVAL_MS = 15000") {
+		t.Error("workbench must poll the dashboard API on a 15 second interval")
+	}
+	if !strings.Contains(body, "visibilitychange") {
+		t.Error("workbench must react to visibilitychange so it can pause polling in the background")
+	}
+	if !strings.Contains(body, "document.hidden") {
+		t.Error("workbench must check document.hidden to skip scheduling polls while the tab is hidden")
+	}
+}
+
+func TestWorkbenchPageHandles401BySendingBrowserBackToGate(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "res.status === 401") {
+		t.Error("workbench fetch must specifically detect a 401 response from the dashboard API")
+	}
+	if !strings.Contains(body, `window.location.replace("/")`) {
+		t.Error("workbench must send an expired/invalid session back to the gate at / on 401, not just show an error banner")
+	}
+}
+
+func TestWorkbenchPageBuildsDOMSafelyWithoutInnerHTML(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if strings.Contains(body, ".innerHTML") {
+		t.Error("workbench must never assign API-derived strings via innerHTML; use textContent/createElement instead")
+	}
+	if !strings.Contains(body, "createElement") || !strings.Contains(body, "textContent") {
+		t.Error("workbench must construct API-derived DOM nodes via createElement/textContent")
+	}
+}
+
+func TestWorkbenchPageHasNoMockDataMarkersOrStaticSampleLabels(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	for _, forbidden := range []string{"演示数据", "演示數據", "mock", "Mock", "MOCK", "sess-mock", "示例会话", "示例數據"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("workbench serves live data and must not carry a leftover mock-data marker/label %q", forbidden)
+		}
+	}
+}
+
+func TestWorkbenchPageDoesNotSimulateLarkTopicCreation(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	for _, forbidden := range []string{"在 Lark 继续", "创建话题", "larkCreateInFlight", `id="artifact-snapshot-dialog"`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("workbench must not simulate a Lark topic write path (removed demo-only prototype), but found %q", forbidden)
+		}
+	}
+}
+
+func TestWorkbenchPageRendersNoForbiddenSensitiveFieldNames(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	forbidden := []string{
+		"user_id", "chat_id", "thread_id", "session_key", "origin_json",
+		"system_prompt", "raw_prompt", "api_key", "secret_key",
+		"billing_url", "cost_usd", "git_branch", "\"cwd\"",
+		"last_activity_description", "推理过程",
+	}
+	for _, word := range forbidden {
+		if strings.Contains(body, word) {
+			t.Errorf("workbench page source must never reference forbidden sensitive field name/content %q", word)
+		}
+	}
+}
+
+// TestWorkbenchPageDoesNotTreatSupersededOrBackgroundAbortsAsFailures guards
+// against a real race: aborting the previous in-flight fetch (because a new
+// poll/retry/visibility-triggered fetch superseded it, or because the tab
+// went to the background) must not be mistaken for a genuine network
+// failure that flashes the stale/error banner or double-schedules the next
+// poll — only the fetch's own timeout firing should count as a failure.
+func TestWorkbenchPageDoesNotTreatSupersededOrBackgroundAbortsAsFailures(t *testing.T) {
+	h := newTestHandler(t)
+	cookie := validSessionCookie(t, h)
+
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "controller.intentional") {
+		t.Error("fetchDashboard's catch/finally must check controller.intentional to distinguish a deliberate abort (superseded or backgrounded) from a real failure")
+	}
+}
+
+func TestHandleWorkbenchPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
 	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, testRedirectURL, logger)
@@ -622,243 +767,19 @@ func TestHandleDemoV2PageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workbench", nil)
 
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				t.Fatalf("handleDemoV2Page panicked on write failure: %v", r)
+				t.Fatalf("handleWorkbenchPage panicked on write failure: %v", r)
 			}
 		}()
-		h.handleDemoV2Page(&failingResponseWriter{}, req)
+		h.handleWorkbenchPage(&failingResponseWriter{}, req)
 	}()
 
 	if !strings.Contains(logBuf.String(), "level\":\"ERROR\"") {
 		t.Errorf("expected an ERROR level log entry for the write failure, got: %s", logBuf.String())
-	}
-}
-
-// --- 8. GET /demo-v2 会话页信息层级 + 「在 Lark 继续」原型（UI-only, 零网络请求） ---
-
-func TestDemoV2SessionsPageGroupsPinnedSessionsWithFullRowMetadata(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if !strings.Contains(body, "置顶会话") {
-		t.Error("会话页必须有一个独立于其他/项目会话之上的「置顶会话」分组")
-	}
-	if !strings.Contains(body, "session_id") {
-		t.Error("每条会话行必须展示精确的 mock session_id 标签文本")
-	}
-	for _, marker := range []string{"条消息", "次工具调用"} {
-		if !strings.Contains(body, marker) {
-			t.Errorf("会话行缺少必需的元数据标记 %q（消息数 / 工具调用数）", marker)
-		}
-	}
-}
-
-func TestDemoV2SessionDetailHasLarkContinueButtonWithConfirmDialog(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if !strings.Contains(body, "在 Lark 继续") {
-		t.Error("会话详情必须有「在 Lark 继续」按钮")
-	}
-	if !strings.Contains(body, "<dialog") {
-		t.Error("「在 Lark 继续」必须打开一个可访问的 <dialog> 确认原型，而不是立即生效")
-	}
-	if !strings.Contains(body, "创建话题") || !strings.Contains(body, "取消") {
-		t.Error("确认对话框必须提供「创建话题」与「取消」两个操作")
-	}
-	if !strings.Contains(body, "演示") {
-		t.Error("Lark 续接原型必须明确标注为演示，避免被误认为真实创建话题")
-	}
-}
-
-func TestDemoV2PageStillMakesZeroNetworkRequestsAfterLarkPrototype(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	for _, forbidden := range []string{"fetch(", "XMLHttpRequest", "/api/v1/", "axios", "WebSocket("} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("新增的「在 Lark 继续」原型必须保持零网络请求，但发现了 %q", forbidden)
-		}
-	}
-}
-
-// --- 9. GET /demo-v2 亮/暗主题切换（UI-only，遵循系统偏好并可持久化） ---
-
-func TestDemoV2PageHasAccessibleThemeToggleWithDarkVariablesAndPersistence(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if !strings.Contains(body, `id="theme-toggle"`) {
-		t.Error("必须有一个 id=\"theme-toggle\" 的主题切换按钮")
-	}
-	if !strings.Contains(body, "aria-pressed") {
-		t.Error("主题切换按钮必须携带 aria-pressed 以反映当前状态")
-	}
-	if !strings.Contains(body, `[data-theme="dark"]`) {
-		t.Error("必须存在基于 [data-theme=\"dark\"] 的暗色语义变量覆盖")
-	}
-	if strings.Count(body, "--brand: #3fb37f;") < 2 {
-		t.Error("显式暗色主题和系统暗色主题都必须使用克制的绿色主强调色")
-	}
-	if !strings.Contains(body, "prefers-color-scheme") {
-		t.Error("初始主题必须回退到 prefers-color-scheme")
-	}
-	if !strings.Contains(body, "localStorage") {
-		t.Error("显式选择的主题必须持久化到 localStorage")
-	}
-	for _, forbidden := range []string{"linear-gradient(", "radial-gradient("} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("暗色主题不允许渐变，但发现了 %q", forbidden)
-		}
-	}
-}
-
-// --- 10. GET /demo-v2 最近活动可访问详情抽屉（白名单字段，无推理/原始 prompt/密钥） ---
-
-func TestDemoV2RecentActivityRowsAreAccessibleButtonsOpeningDetailPanel(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if !strings.Contains(body, `class="activity-row"`) {
-		t.Error("最近活动每一行必须是可识别的 activity-row 元素")
-	}
-	if !strings.Contains(body, `id="activity-detail-panel"`) {
-		t.Error("必须有一个 id=\"activity-detail-panel\" 的详情面板（桌面右侧抽屉 / 移动端全宽视图共用）")
-	}
-	if !strings.Contains(body, `id="activity-detail-close"`) {
-		t.Error("详情面板必须有明确的关闭/返回控件 id=\"activity-detail-close\"")
-	}
-	for _, marker := range []string{"负责 Agent", "关联", "耗时", "摘要", "工具调用"} {
-		if !strings.Contains(body, marker) {
-			t.Errorf("详情面板缺少必需的白名单字段标签 %q", marker)
-		}
-	}
-	for _, forbidden := range []string{"raw_prompt", "system_prompt", "api_key", "secret_key", "推理过程"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("详情面板绝不能出现推理/原始 prompt/密钥相关内容，但发现了 %q", forbidden)
-		}
-	}
-}
-
-// --- 11. GET /demo-v2 自定义可访问状态筛选控件（替换原生 select） ---
-
-func TestDemoV2SessionFilterIsAccessiblePillGroupNotNativeSelect(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if strings.Contains(body, `<select id="session-filter"`) {
-		t.Error("原生 <select> 状态筛选控件必须被移除")
-	}
-	if !strings.Contains(body, `role="radiogroup"`) {
-		t.Error("状态筛选必须是 role=\"radiogroup\" 的可访问药丸控件")
-	}
-	for _, label := range []string{"全部状态", "进行中", "已完成", "失败", "等待中"} {
-		if !strings.Contains(body, label) {
-			t.Errorf("状态筛选缺少选项 %q", label)
-		}
-	}
-	if !strings.Contains(body, `id="session-filter-reset"`) {
-		t.Error("状态筛选必须提供清除/重置入口 id=\"session-filter-reset\"")
-	}
-}
-
-// --- 12. GET /demo-v2 产出物两种明确的查看方式（外链 / 只读快照） ---
-
-func TestDemoV2ArtifactsHaveExplicitLinkAndSnapshotViewTypes(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	if !strings.Contains(body, `target="_blank"`) || !strings.Contains(body, `rel="noopener noreferrer"`) {
-		t.Error("外链产出物必须使用 target=\"_blank\" rel=\"noopener noreferrer\"")
-	}
-	if !strings.Contains(body, "https://") {
-		t.Error("外链产出物必须是 https 链接")
-	}
-	if !strings.Contains(body, `id="artifact-snapshot-dialog"`) {
-		t.Error("只读快照必须在 id=\"artifact-snapshot-dialog\" 的可访问对话框中打开")
-	}
-	for _, forbidden := range []string{"/Users/", `C:\`, "/home/"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("产出物展示绝不能暴露本地绝对路径，但发现了 %q", forbidden)
-		}
-	}
-}
-
-// --- 13. GET /demo-v2 Lark 建话题去重原型（完整状态机 + 防重复点击） ---
-
-func TestDemoV2LarkTopicCreationHasDedupeStateMachineAndDoubleClickGuard(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	for _, state := range []string{"未创建", "检查中", "创建中", "已绑定", "话题失效", "绑定异常", "已归档"} {
-		if !strings.Contains(body, state) {
-			t.Errorf("Lark 建话题原型缺少状态文案 %q", state)
-		}
-	}
-	if !strings.Contains(body, "larkCreateInFlight") {
-		t.Error("必须有防止快速双击/重复创建的进行中标志 larkCreateInFlight")
-	}
-}
-
-// --- 14. GET /demo-v2 全量静态零网络守卫（覆盖全部新增交互） ---
-
-func TestDemoV2PageMakesZeroNetworkRequestsAcrossAllFeatures(t *testing.T) {
-	h := newTestHandler(t)
-	cookie := validSessionCookie(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "/demo-v2", nil)
-	req.AddCookie(cookie)
-	resp := doRequest(h, req)
-	body := readBody(t, resp)
-
-	for _, forbidden := range []string{"fetch(", "XMLHttpRequest", "sendBeacon(", "WebSocket(", "EventSource(", "/api/v1/"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("演示页面必须保持零网络请求，但发现了 %q", forbidden)
-		}
 	}
 }
 

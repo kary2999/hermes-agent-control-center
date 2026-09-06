@@ -19,8 +19,8 @@ var gatePageTemplateSource string
 //go:embed web/dashboard.html
 var dashboardHTML []byte
 
-//go:embed web/demo_v2.html
-var demoV2HTML []byte
+//go:embed web/workbench.html
+var workbenchHTML []byte
 
 // maxSnapshotBodyBytes bounds the size of an accepted POST /api/v1/snapshot
 // body, protecting the Relay from unbounded memory use on a malformed or
@@ -90,7 +90,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /", h.handleGate)
 	mux.HandleFunc("POST /api/v1/session", h.handlePostSession)
 	mux.HandleFunc("GET /dashboard", h.requireSession(h.handleDashboardPage))
-	mux.HandleFunc("GET /demo-v2", h.requireSession(h.handleDemoV2Page))
+	mux.HandleFunc("GET /workbench", h.requireSession(h.handleWorkbenchPage))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
 	mux.HandleFunc("POST /api/v1/snapshot", h.requireAuth(h.handlePostSnapshot))
 	return withNoStore(mux)
@@ -202,11 +202,11 @@ func matchesBearer(r *http.Request, want string) bool {
 // script collects a token, exchanges it for a session via
 // POST /api/v1/session, and sends any cancellation or failure to the
 // configured external redirect. A request that already carries a valid
-// session cookie is sent straight to /demo-v2 instead of being prompted
+// session cookie is sent straight to /workbench instead of being prompted
 // again.
 func (h *Handler) handleGate(w http.ResponseWriter, r *http.Request) {
 	if h.hasValidSession(r) {
-		http.Redirect(w, r, "/demo-v2", http.StatusFound)
+		http.Redirect(w, r, "/workbench", http.StatusFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -250,16 +250,16 @@ func (h *Handler) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDemoV2Page serves the UI-only demo mockup at GET /demo-v2. It is a
-// fully self-contained, static HTML/CSS/JS page built on mock data only: it
-// makes no network requests and never touches live Hermes data or write
-// paths. Reaching this handler already implies requireSession accepted a
+// handleWorkbenchPage serves the live-data workbench at GET /workbench. Its
+// script fetches GET /api/v1/dashboard using the same session cookie that
+// gated this page, so it shows the real Connector snapshot rather than mock
+// data. Reaching this handler already implies requireSession accepted a
 // valid cookie, matching the real dashboard's access boundary.
-func (h *Handler) handleDemoV2Page(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleWorkbenchPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(demoV2HTML); err != nil {
-		h.logger.Error("write demo-v2 page response failed", slog.String("error", err.Error()))
+	if _, err := w.Write(workbenchHTML); err != nil {
+		h.logger.Error("write workbench page response failed", slog.String("error", err.Error()))
 	}
 }
 
