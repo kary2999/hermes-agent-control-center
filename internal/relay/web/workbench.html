@@ -1021,6 +1021,14 @@
       pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
 
+  function formatTokenMillions(value) {
+    var n = Number(value || 0);
+    if (!Number.isFinite(n) || n <= 0) return "0 M";
+    var millions = n / 1000000;
+    if (millions < 0.01) return "0.01 M";
+    return millions.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1") + " M";
+  }
+
   // ---- 数据获取：GET /api/v1/dashboard，同源凭证 + 超时中止 + 可见性感知轮询 ----
 
   var API_URL = "/api/v1/dashboard";
@@ -1267,12 +1275,12 @@
       tr.appendChild(makeEl("td", { text: agent.model }));
       tr.appendChild(makeEl("td", { text: String(agent.total_session_count) }));
       tr.appendChild(makeEl("td", { text: String(agent.active_session_count) }));
-      tr.appendChild(makeEl("td", { text: String(agent.input_tokens) }));
-      tr.appendChild(makeEl("td", { text: String(agent.output_tokens) }));
-      tr.appendChild(makeEl("td", { text: String(agent.cache_read_tokens) }));
-      tr.appendChild(makeEl("td", { text: String(agent.cache_write_tokens) }));
-      tr.appendChild(makeEl("td", { text: String(agent.reasoning_tokens) }));
-      tr.appendChild(makeEl("td", { text: String(tokenTotal) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(agent.input_tokens) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(agent.output_tokens) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(agent.cache_read_tokens) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(agent.cache_write_tokens) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(agent.reasoning_tokens) }));
+      tr.appendChild(makeEl("td", { text: formatTokenMillions(tokenTotal) }));
       tbody.appendChild(tr);
 
       var card = makeEl("article", { className: "record-card" });
@@ -1283,12 +1291,12 @@
       [
         ["会话总数", String(agent.total_session_count)],
         ["进行中会话", String(agent.active_session_count)],
-        ["输入 Token", String(agent.input_tokens)],
-        ["输出 Token", String(agent.output_tokens)],
-        ["缓存读取", String(agent.cache_read_tokens)],
-        ["缓存写入", String(agent.cache_write_tokens)],
-        ["推理 Token", String(agent.reasoning_tokens)],
-        ["Token 总计", String(tokenTotal)]
+        ["输入 Token", formatTokenMillions(agent.input_tokens)],
+        ["输出 Token", formatTokenMillions(agent.output_tokens)],
+        ["缓存读取", formatTokenMillions(agent.cache_read_tokens)],
+        ["缓存写入", formatTokenMillions(agent.cache_write_tokens)],
+        ["推理 Token", formatTokenMillions(agent.reasoning_tokens)],
+        ["Token 总计", formatTokenMillions(tokenTotal)]
       ].forEach(function (pair) {
         dl.appendChild(makeEl("dt", { text: pair[0] }));
         dl.appendChild(makeEl("dd", { text: pair[1] }));
@@ -1424,7 +1432,7 @@
       var tb = b.occurredAt ? new Date(b.occurredAt).getTime() : 0;
       return tb - ta;
     });
-    return items.slice(0, 20);
+    return items.slice(0, 10);
   }
 
   var activityFeedEl = document.getElementById("activity-feed");
@@ -1676,11 +1684,11 @@
       ["最后活动时间", session.last_activity_at ? formatDateTime(session.last_activity_at) : "—"],
       ["消息数", String(session.message_count)],
       ["工具调用次数", String(session.tool_call_count)],
-      ["输入 Token", String(session.input_tokens)],
-      ["输出 Token", String(session.output_tokens)],
-      ["缓存读取 Token", String(session.cache_read_tokens)],
-      ["缓存写入 Token", String(session.cache_write_tokens)],
-      ["推理 Token", String(session.reasoning_tokens)],
+      ["输入 Token", formatTokenMillions(session.input_tokens)],
+      ["输出 Token", formatTokenMillions(session.output_tokens)],
+      ["缓存读取 Token", formatTokenMillions(session.cache_read_tokens)],
+      ["缓存写入 Token", formatTokenMillions(session.cache_write_tokens)],
+      ["推理 Token", formatTokenMillions(session.reasoning_tokens)],
       ["最新用户提示", session.last_user_prompt || "—"],
       ["最新用户提示时间", session.last_user_prompt_at ? formatDateTime(session.last_user_prompt_at) : "—"],
       ["置顶", session.pinned ? "是" : "否"],
