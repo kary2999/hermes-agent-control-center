@@ -44,12 +44,12 @@
   </section>
 
   <section>
-    <h2>执行中 / 未完成任务</h2>
+    <h2>最近执行任务</h2>
     <table>
       <thead><tr><th>标题</th><th>负责人</th><th>状态</th><th>阶段与进度</th></tr></thead>
       <tbody id="active-body"></tbody>
     </table>
-    <div id="active-empty" class="empty" style="display:none">暂无进行中或未完成任务</div>
+    <div id="active-empty" class="empty" style="display:none">暂无最近执行任务</div>
   </section>
 
   <section>
@@ -151,7 +151,7 @@
       ' · 接收时间: ' + fmtTime(data.snapshot_received_at) +
       ' · 刷新时间: ' + fmtTime(data.generated_at);
     renderAgents(data.agents || []);
-    renderActive(data.active_tasks || []);
+    renderActive(data.recent_tasks || []);
     renderCompleted(data.recent_completed || []);
   }
 

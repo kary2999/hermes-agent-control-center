@@ -74,7 +74,7 @@ func TestHandoffStoreBoundsCommandsPrunesOnlyTerminal(t *testing.T) {
 			t.Fatalf("Create(%d) error = %v", i, err)
 		}
 		if i < 5 {
-			if _, err := store.Complete(created.Command.ID, handoffCommandStateCompleted); err != nil {
+			if _, err := store.Complete(created.Command.ID, handoffCommandStateCompleted, ""); err != nil {
 				t.Fatalf("Complete(%d) error = %v", i, err)
 			}
 		}

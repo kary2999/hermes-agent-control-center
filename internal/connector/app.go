@@ -278,15 +278,17 @@ func (a *App) processOneHandoff(ctx context.Context) {
 	}
 	if !validSessionID(cmd.SessionID) {
 		a.logger.Error("execute handoff rejected", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "invalid_session_id"))
-		_ = a.postHandoffResult(ctx, cmd.CommandID, "failed")
+		_ = a.postHandoffResult(ctx, cmd.CommandID, "failed", "invalid session id")
 		return
 	}
 	status := "completed"
+	reason := ""
 	if err := a.runner.Run(ctx, a.cfg.HandoffCommand, cmd.SessionID); err != nil {
 		status = "failed"
+		reason = truncateRunes(sanitizePreview(err.Error()), maxHandoffReasonRunes)
 		a.logger.Error("execute handoff failed", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "exec"))
 	}
-	if err := a.postHandoffResult(ctx, cmd.CommandID, status); err != nil {
+	if err := a.postHandoffResult(ctx, cmd.CommandID, status, reason); err != nil {
 		a.logger.Error("report handoff result failed", slog.String("command_id", cmd.CommandID), slog.String("session_id", cmd.SessionID), slog.String("error_kind", "result"))
 	}
 }
@@ -318,8 +320,17 @@ func (a *App) claimHandoff(ctx context.Context) (handoffCommandWire, bool, error
 	return *payload.Command, true, nil
 }
 
-func (a *App) postHandoffResult(ctx context.Context, commandID, status string) error {
-	body, err := json.Marshal(map[string]string{"command_id": commandID, "status": status})
+// maxHandoffReasonRunes bounds the failure reason sent to the Relay,
+// keeping the request small and matching the dashboard-facing preview
+// convention used elsewhere in the Connector.
+const maxHandoffReasonRunes = 200
+
+func (a *App) postHandoffResult(ctx context.Context, commandID, status, reason string) error {
+	payload := map[string]string{"command_id": commandID, "status": status}
+	if reason != "" {
+		payload["error"] = reason
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal handoff result: %w", err)
 	}

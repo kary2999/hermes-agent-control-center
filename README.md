@@ -22,6 +22,52 @@ MVP 已完成并通过本地真实链路验证。
 - 共享令牌从环境变量读取，不写入仓库或日志。
 - Relay 内嵌网页，无需 Node.js、Docker、数据库或 Redis。
 
+## 架构介绍
+
+```text
+Mac mini / 本地 Hermes 主机
+┌──────────────────────────────┐
+│ Hermes state.db / kanban.db  │
+│ 只读采集任务、会话、handoff状态 │
+└──────────────┬───────────────┘
+               │ 本地只读
+┌──────────────▼───────────────┐
+│ hermes-connector             │
+│ - 定时采集脱敏快照             │
+│ - 轮询 Relay handoff 命令      │
+│ - 上报执行结果和失败短原因       │
+└──────────────┬───────────────┘
+               │ HTTPS + Bearer Token
+               │ Mac 主动出站，不暴露本机端口
+┌──────────────▼───────────────┐
+│ hermes-relay / 服务器          │
+│ - 内存保存最新快照              │
+│ - 提供认证后的 dashboard API    │
+│ - 提供 Lark Workbench HTML     │
+│ - 持久化最小 handoff 队列        │
+└──────────────┬───────────────┘
+               │ HTTPS 反向代理
+┌──────────────▼───────────────┐
+│ Lark / Browser Workbench      │
+│ - 只读查看 Agent、任务、会话      │
+│ - 可触发受限的 Lark 交接动作      │
+│ - 不展示 Prompt、Token、密钥      │
+└──────────────────────────────┘
+```
+
+### 组件职责
+
+- **Connector**：运行在 Mac mini，负责只读采集 Hermes 本地状态并主动上传脱敏快照；需要执行 Lark 会话交接时，也由 Connector 在本机侧领取并执行命令，避免服务器持有 Lark/Hermes 本地敏感上下文。
+- **Relay**：运行在服务器，仅保存最新工作台快照和最小 handoff 队列；对外提供 HTTPS 页面和 API，不依赖数据库、Redis、Node.js 或 Docker。
+- **Workbench 页面**：内嵌在 Relay 二进制中，面向 Lark 工作台和浏览器展示简体中文只读监控界面；默认不读取、不渲染 Prompt 正文、消息正文、Token 或密钥。
+
+### 数据与安全边界
+
+- Mac mini 到服务器只走主动出站 HTTPS，同步内容是脱敏后的状态快照。
+- 写入快照和读取工作台使用不同认证路径；共享令牌只从环境变量读取，禁止提交到 GitHub。
+- Handoff 失败原因只保留脱敏、有长度上限的短文本，用于解释“为什么中断/可重试”。
+- GitHub 是服务器端 Relay 和 Mac mini Connector 的唯一代码维护来源；部署版本必须能追溯到提交或 Release。
+
 ## 构建
 
 ```bash

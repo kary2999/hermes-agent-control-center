@@ -191,6 +191,42 @@ func TestSQLiteCollectorMapsSessionsFromExplicitColumnsAndExcludesSentinelSecret
 	}
 }
 
+func TestSQLiteCollectorMapsHandoffErrorAsRedactedReason(t *testing.T) {
+	secret := "sk-" + strings.Repeat("C", 48)
+	kanbanPath := emptyKanbanFixture(t)
+	statePath := createStateDBFixture(t, func(db *sql.DB) {
+		mustExec(t, db, sessionSchemaWithSentinels)
+		mustExec(t, db, `ALTER TABLE sessions ADD COLUMN handoff_state TEXT`)
+		mustExec(t, db, `ALTER TABLE sessions ADD COLUMN handoff_platform TEXT`)
+		mustExec(t, db, `ALTER TABLE sessions ADD COLUMN handoff_error TEXT`)
+		insertSentinelSession(t, db, "sess-1", 1756861323.5, nil, 1756861400.25, 0)
+		mustExec(t, db, `UPDATE sessions SET handoff_state = 'failed', handoff_platform = 'feishu', handoff_error = ? WHERE id = 'sess-1'`,
+			"handoff command failed: token="+secret)
+	})
+
+	c, err := NewSQLiteCollectorWithStateDB(kanbanPath, statePath)
+	if err != nil {
+		t.Fatalf("NewSQLiteCollectorWithStateDB() error = %v", err)
+	}
+	snap, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if len(snap.Sessions) != 1 {
+		t.Fatalf("len(Sessions) = %d, want 1", len(snap.Sessions))
+	}
+	s := snap.Sessions[0]
+	if s.HandoffState != "failed" || s.HandoffPlatform != "feishu" {
+		t.Fatalf("handoff state/platform = %q/%q, want failed/feishu", s.HandoffState, s.HandoffPlatform)
+	}
+	if s.HandoffReason == "" {
+		t.Fatal("HandoffReason is empty, want sanitized failure reason")
+	}
+	if strings.Contains(s.HandoffReason, secret) || !strings.Contains(s.HandoffReason, redactedPlaceholder) {
+		t.Fatalf("HandoffReason = %q, want secret redacted", s.HandoffReason)
+	}
+}
+
 // TestSQLiteCollectorMapsNullOptionalTextColumnsToEmptyString
 // 是针对生产环境 bug 的回归测试：真实 Hermes state.db 中 title、model 或
 // profile_name 为 NULL 的会话行会导致 Snapshot() 失败，报错

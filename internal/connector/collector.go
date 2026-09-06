@@ -97,6 +97,10 @@ type SessionSummary struct {
 	LastUserPromptAt *time.Time `json:"last_user_prompt_at,omitempty"`
 	HandoffState     string     `json:"handoff_state,omitempty"`
 	HandoffPlatform  string     `json:"handoff_platform,omitempty"`
+	// HandoffReason 是该会话最近一次 handoff 失败原因的脱敏、有界预览（见
+	// sanitizePreview），来自可选的 sessions.handoff_error 列。列不存在或值
+	// 为 NULL 时为空字符串，绝不因此让整次采集失败。
+	HandoffReason string `json:"handoff_reason,omitempty"`
 }
 
 // Snapshot 是 Hermes kanban 与会话状态在某一时间点的完整只读快照。
@@ -419,7 +423,7 @@ const maxSessions = 200
 // 复用，避免置顶/未置顶两段 SQL 出现列顺序不一致。
 const sessionColumnList = `id, title, source, model, profile_name, started_at, ended_at, last_activity_at,
 			message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
-			cache_write_tokens, reasoning_tokens, pinned, archived, handoff_state, handoff_platform`
+			cache_write_tokens, reasoning_tokens, pinned, archived, handoff_state, handoff_platform, handoff_error`
 
 // readSessions 用单条 SQL 语句采集脱敏会话元数据（不存在 N+1 查询）：
 //   - 置顶会话（pinned != 0）永远全部包含，不计入 maxSessions 上限；
@@ -457,6 +461,7 @@ func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
 			pinned, archived              int64
 			lastUserPromptRaw             sql.NullString
 			handoffState, handoffPlatform sql.NullString
+			handoffError                  sql.NullString
 			lastUserPromptAtUnix          sql.NullFloat64
 		)
 		if err := rows.Scan(
@@ -479,6 +484,7 @@ func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
 			&archived,
 			&handoffState,
 			&handoffPlatform,
+			&handoffError,
 			&lastUserPromptRaw,
 			&lastUserPromptAtUnix,
 		); err != nil {
@@ -500,6 +506,7 @@ func readSessions(ctx context.Context, db *sql.DB) ([]SessionSummary, error) {
 		session.LastUserPromptAt = parseNullableUnixSecondsReal(lastUserPromptAtUnix)
 		session.HandoffState = mapHandoffState(nullableString(handoffState))
 		session.HandoffPlatform = mapHandoffPlatform(nullableString(handoffPlatform))
+		session.HandoffReason = sanitizePreview(nullableString(handoffError))
 		session.Title = truncateRunes(deriveSessionTitle(nullableString(title), session.LastUserPrompt, session.Source, session.StartedAt), 256)
 		sessions = append(sessions, session)
 	}
@@ -526,6 +533,11 @@ func sessionsColumnSelect(ctx context.Context, db *sql.DB) (string, error) {
 		base += ", handoff_platform"
 	} else {
 		base += ", NULL AS handoff_platform"
+	}
+	if columns["handoff_error"] {
+		base += ", handoff_error"
+	} else {
+		base += ", NULL AS handoff_error"
 	}
 	return base, nil
 }
@@ -696,7 +708,7 @@ func buildSessionsQuery(plan messagesJoinPlan, columns string) string {
 // last_user_prompt/at），供 buildSessionsQuery 复用。
 const sessionSelectAliasList = `id, title, source, model, profile_name, started_at, ended_at, last_activity_at,
 			message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
-			cache_write_tokens, reasoning_tokens, pinned, archived, handoff_state, handoff_platform, last_user_prompt, last_user_prompt_at`
+			cache_write_tokens, reasoning_tokens, pinned, archived, handoff_state, handoff_platform, handoff_error, last_user_prompt, last_user_prompt_at`
 
 // prefixColumns 给 sessionColumnList 中的每一列加上表别名前缀（如
 // "s.id, s.title, ..."），用于在带 JOIN 的子查询里消除列名歧义。

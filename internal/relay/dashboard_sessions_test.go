@@ -31,6 +31,9 @@ func TestBuildDashboardMapsSessionsToExplicitSessionView(t *testing.T) {
 				ReasoningTokens:  5,
 				Pinned:           true,
 				Archived:         false,
+				HandoffState:     "failed",
+				HandoffPlatform:  "feishu",
+				HandoffReason:    "handoff failed: token=sk-" + strings.Repeat("C", 48),
 			},
 		},
 	}
@@ -61,6 +64,12 @@ func TestBuildDashboardMapsSessionsToExplicitSessionView(t *testing.T) {
 	}
 	if !s.Pinned || s.Archived {
 		t.Errorf("pinned/archived incorrect: %+v", s)
+	}
+	if s.HandoffState != "failed" || s.HandoffPlatform != "feishu" {
+		t.Errorf("handoff state/platform incorrect: %+v", s)
+	}
+	if s.HandoffReason == "" || strings.Contains(s.HandoffReason, "sk-") {
+		t.Errorf("HandoffReason = %q, want redacted non-empty reason", s.HandoffReason)
 	}
 }
 

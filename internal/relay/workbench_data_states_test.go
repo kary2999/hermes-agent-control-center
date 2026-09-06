@@ -96,6 +96,25 @@ func TestWorkbenchNormalizesNullArraysFromOlderRelayVersions(t *testing.T) {
 	}
 }
 
+func TestWorkbenchOverviewUsesRecentTasksInsteadOfActiveTasks(t *testing.T) {
+	body := workbenchBody(t)
+
+	for _, marker := range []string{
+		"最近执行任务",
+		"d.recent_tasks = normalizeListField(d.recent_tasks)",
+		"Array.isArray(d.recent_tasks)",
+		"renderActiveTasksTable(data.recent_tasks)",
+		`"最近执行 " + String(data.recent_tasks.length)`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("workbench overview must use recent_tasks contract via %q", marker)
+		}
+	}
+	if strings.Contains(body, "<h2>进行中任务</h2>") {
+		t.Error("overview card title must not keep the old 进行中任务 wording")
+	}
+}
+
 // TestWorkbenchLoadingStateUsesNeutralGrayNotBrandColor 校验加载态使用中性
 // 灰色而不是品牌色，与"加载灰、空态正常、过期黄、不可用红"的状态语义保持
 // 一致（stale 黄色 / error 红色已经是既有实现，这里只需要锁定 loading）。
@@ -202,6 +221,8 @@ func TestWorkbenchShowsTruthfulDisabledLarkHandoffStatus(t *testing.T) {
 	for _, marker := range []string{
 		"lark_handoff_available",
 		"lark_handoff_reason",
+		"handoff_reason",
+		"上次创建中断，可重试",
 		"Lark 交接",
 	} {
 		if !strings.Contains(body, marker) {
