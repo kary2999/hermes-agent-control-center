@@ -82,6 +82,9 @@ type TaskView struct {
 	CreatedAt        time.Time  `json:"created_at"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	// LastRunAt 是该任务在 task_runs 中最近一次运行的 started_at；没有任何
+	// 运行记录时为空。
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
 }
 
 // SessionView 是 GET /api/v1/dashboard 返回的、面向 dashboard 的显式
@@ -123,8 +126,15 @@ type DashboardView struct {
 	SnapshotTakenAt  *time.Time     `json:"snapshot_taken_at,omitempty"`
 	SnapshotReceived *time.Time     `json:"snapshot_received_at,omitempty"`
 	Agents           []AgentSummary `json:"agents"`
-	ActiveTasks      []TaskView     `json:"active_tasks"`
-	RecentCompleted  []TaskView     `json:"recent_completed"`
+	// ActiveTasks 保留用于向后兼容；总览 UI 已改用 RecentTasks，不再消费
+	// 本字段。
+	ActiveTasks     []TaskView `json:"active_tasks"`
+	RecentCompleted []TaskView `json:"recent_completed"`
+	// RecentTasks 是总览"最近执行任务"的数据源：按 task_id 聚合
+	// task_runs，取每个任务最近一次运行的时间，仅包含至少有一条运行记录
+	// 的任务，按该时间倒序，最多 maxRecentTasks 条。运行中/完成/失败的任务
+	// 都可能出现，各自保留其明确状态。
+	RecentTasks []TaskView `json:"recent_tasks"`
 	// AllTasks 包含全部任务（进行中/已完成/失败），供顶层"任务"页面按
 	// all/active/completed/failed 筛选展示，也是总览任务数指标的数据源。
 	AllTasks []TaskView    `json:"all_tasks"`
@@ -144,6 +154,8 @@ const larkHandoffUnavailableReason = "当前环境尚未启用 Lark 会话交接
 // keeping the payload and page small regardless of board history size.
 const maxRecentCompleted = 20
 
+const maxRecentTasks = 20
+
 // BuildDashboard maps a raw Connector snapshot into the display-ready
 // DashboardView used by both the JSON API and the embedded HTML page.
 func BuildDashboard(deviceID string, snap Snapshot, receivedAt time.Time, hasSnapshot bool, now time.Time) DashboardView {
@@ -156,6 +168,7 @@ func BuildDashboardWithHandoff(deviceID string, snap Snapshot, receivedAt time.T
 		HasSnapshot:          hasSnapshot,
 		Agents:               []AgentSummary{},
 		ActiveTasks:          []TaskView{},
+		RecentTasks:          []TaskView{},
 		AllTasks:             []TaskView{},
 		Sessions:             []SessionView{},
 		LarkHandoffAvailable: relayHandoffConfigured && hasSnapshot && snap.Capabilities.LarkHandoff,
@@ -175,8 +188,13 @@ func BuildDashboardWithHandoff(deviceID string, snap Snapshot, receivedAt time.T
 	view.SnapshotReceived = &received
 
 	runsByID := make(map[int64]TaskRun, len(snap.Runs))
+	latestRunByTaskID := make(map[string]TaskRun, len(snap.Runs))
 	for _, run := range snap.Runs {
 		runsByID[run.ID] = run
+		latest, ok := latestRunByTaskID[run.TaskID]
+		if !ok || run.StartedAt.After(latest.StartedAt) || (run.StartedAt.Equal(latest.StartedAt) && run.ID > latest.ID) {
+			latestRunByTaskID[run.TaskID] = run
+		}
 	}
 	sessionsByID := make(map[string]SessionSummary, len(snap.Sessions))
 	for _, s := range snap.Sessions {
@@ -191,6 +209,7 @@ func BuildDashboardWithHandoff(deviceID string, snap Snapshot, receivedAt time.T
 	// 非法。
 	active := []TaskView{}
 	completed := []TaskView{}
+	recent := []TaskView{}
 	all := []TaskView{}
 
 	for _, task := range snap.Tasks {
@@ -210,6 +229,22 @@ func BuildDashboardWithHandoff(deviceID string, snap Snapshot, receivedAt time.T
 			CreatedAt:        task.CreatedAt,
 			StartedAt:        task.StartedAt,
 			CompletedAt:      task.CompletedAt,
+		}
+		if latestRun, ok := latestRunByTaskID[task.ID]; ok {
+			rv := tv
+			latest := latestRun.StartedAt
+			rv.LastRunAt = &latest
+			rv.Status = latestRun.Status
+			if latestRun.ID != 0 {
+				latestRunID := latestRun.ID
+				recentTask := task
+				recentTask.CurrentRunID = &latestRunID
+				percent, stage, running = deriveProgress(recentTask, runsByID)
+				rv.ProgressPercent = percent
+				rv.Stage = stage
+				rv.IsRunning = running
+			}
+			recent = append(recent, rv)
 		}
 		all = append(all, tv)
 
@@ -236,15 +271,25 @@ func BuildDashboardWithHandoff(deviceID string, snap Snapshot, receivedAt time.T
 	sort.Slice(completed, func(i, j int) bool {
 		return completed[i].CompletedAt.After(*completed[j].CompletedAt)
 	})
+	sort.Slice(recent, func(i, j int) bool {
+		if recent[i].LastRunAt.Equal(*recent[j].LastRunAt) {
+			return recent[i].ID < recent[j].ID
+		}
+		return recent[i].LastRunAt.After(*recent[j].LastRunAt)
+	})
 
 	sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
 
 	if len(completed) > maxRecentCompleted {
 		completed = completed[:maxRecentCompleted]
 	}
+	if len(recent) > maxRecentTasks {
+		recent = recent[:maxRecentTasks]
+	}
 
 	view.Agents = buildAgentSummaries(snap.Sessions)
 	view.ActiveTasks = active
+	view.RecentTasks = recent
 	view.RecentCompleted = completed
 	view.AllTasks = all
 	view.Sessions = buildSessionViews(snap.Sessions)

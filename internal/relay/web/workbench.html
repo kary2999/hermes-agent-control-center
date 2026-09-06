@@ -765,7 +765,7 @@
 
       <div class="grid two-col">
         <div class="card">
-          <h2>进行中任务</h2>
+          <h2>最近执行任务</h2>
           <table class="data-table">
             <thead>
               <tr><th>任务</th><th>负责 Agent</th><th>阶段</th><th>进度</th><th>状态</th></tr>
@@ -1082,6 +1082,7 @@
     if (!d || typeof d !== "object") return d;
     d.agents = normalizeListField(d.agents);
     d.active_tasks = normalizeListField(d.active_tasks);
+    d.recent_tasks = normalizeListField(d.recent_tasks);
     d.recent_completed = normalizeListField(d.recent_completed);
     d.all_tasks = normalizeListField(d.all_tasks);
     d.sessions = normalizeListField(d.sessions);
@@ -1092,6 +1093,7 @@
     return !!d && typeof d === "object" &&
       Array.isArray(d.agents) &&
       Array.isArray(d.active_tasks) &&
+      Array.isArray(d.recent_tasks) &&
       Array.isArray(d.recent_completed) &&
       Array.isArray(d.all_tasks) &&
       Array.isArray(d.sessions) &&
@@ -1203,9 +1205,9 @@
     clearChildren(cards);
 
     if (tasks.length === 0) {
-      var emptyTd = makeEl("td", { text: "暂无进行中任务", attrs: { colspan: "5" } });
+      var emptyTd = makeEl("td", { text: "暂无最近执行任务", attrs: { colspan: "5" } });
       tbody.appendChild(makeEl("tr")).appendChild(emptyTd);
-      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无进行中任务" }));
+      cards.appendChild(makeEl("div", { className: "empty-state", text: "暂无最近执行任务" }));
       return;
     }
 
@@ -1767,11 +1769,11 @@
     // color: transparent 一直盖住。
     if (metricAgents) { metricAgents.classList.remove("skel"); metricAgents.textContent = String(data.agents.length); }
     if (metricTotalTasks) { metricTotalTasks.classList.remove("skel"); metricTotalTasks.textContent = String(data.all_tasks.length); }
-    if (metricActiveTasksSub) { metricActiveTasksSub.textContent = "进行中 " + String(data.active_tasks.length); }
+    if (metricActiveTasksSub) { metricActiveTasksSub.textContent = "最近执行 " + String(data.recent_tasks.length); }
     if (metricRecentCompleted) { metricRecentCompleted.classList.remove("skel"); metricRecentCompleted.textContent = String(data.recent_completed.length); }
     if (metricSessions) { metricSessions.classList.remove("skel"); metricSessions.textContent = String(data.sessions.length); }
 
-    renderActiveTasksTable(data.active_tasks);
+    renderActiveTasksTable(data.recent_tasks);
     renderActivityFeed(buildRecentActivity(data));
 
     var agentsSub = document.getElementById("agents-count-sub");

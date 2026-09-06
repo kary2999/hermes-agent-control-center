@@ -8,6 +8,7 @@ secrets/
 data/
 results/
 dist/
+bin/
 .tmp/
 /connector
 /relay
