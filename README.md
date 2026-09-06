@@ -68,6 +68,10 @@ Mac mini / 本地 Hermes 主机
 - Handoff 失败原因只保留脱敏、有长度上限的短文本，用于解释“为什么中断/可重试”。
 - GitHub 是服务器端 Relay 和 Mac mini Connector 的唯一代码维护来源；部署版本必须能追溯到提交或 Release。
 
+## 具体实现方案
+
+当前实现细节见：[`docs/implementation-design.md`](docs/implementation-design.md)。
+
 ## 构建
 
 ```bash
@@ -97,7 +101,7 @@ export HERMES_POLL_INTERVAL="10s"
 ./dist/hermes-connector
 ```
 
-浏览器访问 Relay 根地址后，页面只显示通用令牌验证提示；令牌正确时换取安全的限时会话 Cookie 并进入 `/dashboard`，取消或验证失败会跳转到 `HERMES_UNAUTHORIZED_REDIRECT_URL`。共享令牌不会保存到浏览器存储。
+浏览器访问 Relay 根地址后，页面显示同域访问码表单；令牌正确时换取安全的限时会话 Cookie 并进入 `/workbench`。验证失败只在当前页展示错误，未认证访问 `/workbench` 会回到同域 `/`，不会跳转到 `ikarp.top`。共享令牌不会保存到浏览器存储。
 
 ## MVP 边界
 
