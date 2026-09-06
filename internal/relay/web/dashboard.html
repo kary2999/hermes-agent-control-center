@@ -70,12 +70,6 @@
     return d.toLocaleString('zh-CN', { hour12: false });
   }
 
-  function escapeHTML(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
-
   function showError(msg) {
     var el = document.getElementById('error');
     el.textContent = msg;
@@ -84,44 +78,63 @@
 
   function renderAgents(agents) {
     var body = document.getElementById('agents-body');
-    body.innerHTML = '';
+    clearChildren(body);
     document.getElementById('agents-empty').style.display = agents.length ? 'none' : 'block';
     agents.forEach(function (a) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + escapeHTML(a.assignee) + '</td>' +
-        '<td>' + a.unfinished_count + '</td>' +
-        '<td>' + a.running_count + '</td>';
+      appendCell(tr, a.assignee);
+      appendCell(tr, a.unfinished_count);
+      appendCell(tr, a.running_count);
       body.appendChild(tr);
     });
   }
 
   function renderActive(tasks) {
     var body = document.getElementById('active-body');
-    body.innerHTML = '';
+    clearChildren(body);
     document.getElementById('active-empty').style.display = tasks.length ? 'none' : 'block';
     tasks.forEach(function (t) {
       var tr = document.createElement('tr');
       var statusCls = t.is_running ? 'running' : '';
-      tr.innerHTML = '<td>' + escapeHTML(t.title || t.id) + '</td>' +
-        '<td>' + escapeHTML(t.assignee || '未分配') + '</td>' +
-        '<td class="' + statusCls + '">' + escapeHTML(t.status) + '</td>' +
-        '<td><span class="progress"><i style="width:' + t.progress_percent + '%"></i></span>' +
-        escapeHTML(t.stage) + ' (' + t.progress_percent + '%)</td>';
+      appendCell(tr, t.title || t.id);
+      appendCell(tr, t.assignee || '未分配');
+      var status = appendCell(tr, t.status);
+      status.className = statusCls;
+      var progressCell = document.createElement('td');
+      var progress = document.createElement('span');
+      progress.className = 'progress';
+      var bar = document.createElement('i');
+      bar.style.width = t.progress_percent + '%';
+      progress.appendChild(bar);
+      progressCell.appendChild(progress);
+      progressCell.appendChild(document.createTextNode(String(t.stage || '') + ' (' + t.progress_percent + '%)'));
+      tr.appendChild(progressCell);
       body.appendChild(tr);
     });
   }
 
   function renderCompleted(tasks) {
     var body = document.getElementById('completed-body');
-    body.innerHTML = '';
+    clearChildren(body);
     document.getElementById('completed-empty').style.display = tasks.length ? 'none' : 'block';
     tasks.forEach(function (t) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + escapeHTML(t.title || t.id) + '</td>' +
-        '<td>' + escapeHTML(t.assignee || '未分配') + '</td>' +
-        '<td>' + fmtTime(t.completed_at) + '</td>';
+      appendCell(tr, t.title || t.id);
+      appendCell(tr, t.assignee || '未分配');
+      appendCell(tr, fmtTime(t.completed_at));
       body.appendChild(tr);
     });
+  }
+
+  function clearChildren(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function appendCell(row, value) {
+    var cell = document.createElement('td');
+    cell.textContent = value == null ? '' : String(value);
+    row.appendChild(cell);
+    return cell;
   }
 
   function render(data) {
