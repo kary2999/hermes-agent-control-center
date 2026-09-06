@@ -135,7 +135,14 @@ func BuildDashboard(deviceID string, snap Snapshot, receivedAt time.Time, hasSna
 	}
 
 	agentCounts := make(map[string]*AgentSummary)
-	var active, completed []TaskView
+	// active/completed 必须以空切片字面量初始化，不能用
+	// `var active, completed []TaskView`（nil 切片）：snap.Tasks 为空时
+	// append 从不触发，nil 会原样赋给 view.ActiveTasks /
+	// view.RecentCompleted，json.Marshal 把 nil 切片序列化成 null 而不是
+	// []，工作台前端的严格校验器（Array.isArray）会因此判定整份 payload
+	// 非法。
+	active := []TaskView{}
+	completed := []TaskView{}
 
 	for _, task := range snap.Tasks {
 		percent, stage, running := deriveProgress(task, runsByID)

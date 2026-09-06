@@ -273,9 +273,26 @@
     border: 1px solid transparent;
   }
   .status-banner[hidden] { display: none; }
-  .status-banner[data-state="loading"] { background: var(--brand-weak); color: var(--brand); }
+  .status-banner[data-state="loading"] { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
   .status-banner[data-state="stale"] { background: var(--warn-bg); color: var(--warn); border-color: #f0d999; }
   .status-banner[data-state="error"] { background: var(--danger-bg); color: var(--danger); }
+
+  /* ---------- Skeleton placeholders (first load, before any snapshot has
+     arrived) — gray and inert, so a slow/failed first fetch never collapses
+     the layout or reads as blank. Cleared the moment real content renders:
+     every render*() function already clearChildren()s its container before
+     writing real rows, so these placeholders disappear on first success
+     without any extra JS beyond the 4 metric-value spans below. ---------- */
+  .skel {
+    display: inline-block;
+    min-width: 2.5em;
+    height: 0.9em;
+    border-radius: 4px;
+    background: var(--border);
+    color: transparent;
+    animation: skel-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   .status-retry-btn {
     min-height: 32px;
     padding: 0 12px;
@@ -723,19 +740,19 @@
       <div class="grid metrics-grid">
         <div class="card metric-card">
           <div class="metric-label">Agent 数</div>
-          <div class="metric-value" id="metric-agents">—</div>
+          <div class="metric-value skel" id="metric-agents">&nbsp;</div>
         </div>
         <div class="card metric-card">
           <div class="metric-label">进行中任务</div>
-          <div class="metric-value" id="metric-active-tasks">—</div>
+          <div class="metric-value skel" id="metric-active-tasks">&nbsp;</div>
         </div>
         <div class="card metric-card">
           <div class="metric-label">最近完成任务</div>
-          <div class="metric-value" id="metric-recent-completed">—</div>
+          <div class="metric-value skel" id="metric-recent-completed">&nbsp;</div>
         </div>
         <div class="card metric-card">
           <div class="metric-label">会话数</div>
-          <div class="metric-value" id="metric-sessions">—</div>
+          <div class="metric-value skel" id="metric-sessions">&nbsp;</div>
         </div>
       </div>
 
@@ -746,14 +763,22 @@
             <thead>
               <tr><th>任务</th><th>负责 Agent</th><th>阶段</th><th>进度</th><th>状态</th></tr>
             </thead>
-            <tbody id="active-tasks-tbody"></tbody>
+            <tbody id="active-tasks-tbody">
+              <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+              <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+            </tbody>
           </table>
-          <div class="record-cards" id="active-tasks-cards"></div>
+          <div class="record-cards" id="active-tasks-cards">
+            <article class="record-card" data-skeleton="true" aria-hidden="true"><div class="rc-top"><span class="skel">&nbsp;</span></div></article>
+          </div>
         </div>
 
         <div class="card">
           <h2>最近活动</h2>
-          <ul class="feed" id="activity-feed"></ul>
+          <ul class="feed" id="activity-feed">
+            <li data-skeleton="true" aria-hidden="true"><span class="skel">&nbsp;</span></li>
+            <li data-skeleton="true" aria-hidden="true"><span class="skel">&nbsp;</span></li>
+          </ul>
         </div>
       </div>
     </section>
@@ -770,9 +795,14 @@
           <thead>
             <tr><th>负责 Agent</th><th>未完成任务数</th><th>运行中</th></tr>
           </thead>
-          <tbody id="agents-tbody"></tbody>
+          <tbody id="agents-tbody">
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+          </tbody>
         </table>
-        <div class="record-cards" id="agents-cards"></div>
+        <div class="record-cards" id="agents-cards">
+          <article class="record-card" data-skeleton="true" aria-hidden="true"><div class="rc-top"><span class="skel">&nbsp;</span></div></article>
+        </div>
       </div>
     </section>
 
@@ -1002,6 +1032,23 @@
       : "";
   }
 
+  // normalizeListField 把 null/undefined 规整成 []，容忍尚未升级到本次
+  // 修复的旧版本 Relay：其 BuildDashboard 在快照没有任务/会话时会把集合
+  // 字段序列化成 null 而不是 []（生产事故的根因），前端不应因为对端还没
+  // 升级就整页报错，而是把 null 当成"空集合"正常渲染。
+  function normalizeListField(value) {
+    return value === null || value === undefined ? [] : value;
+  }
+
+  function normalizeDashboardPayload(d) {
+    if (!d || typeof d !== "object") return d;
+    d.agents = normalizeListField(d.agents);
+    d.active_tasks = normalizeListField(d.active_tasks);
+    d.recent_completed = normalizeListField(d.recent_completed);
+    d.sessions = normalizeListField(d.sessions);
+    return d;
+  }
+
   function isValidDashboardPayload(d) {
     return !!d && typeof d === "object" &&
       Array.isArray(d.agents) &&
@@ -1057,6 +1104,7 @@
       })
       .then(function (data) {
         if (data === null) return; // 401 分支已跳转，无需继续处理
+        data = normalizeDashboardPayload(data);
         if (!isValidDashboardPayload(data)) {
           throw new Error("invalid_payload");
         }
@@ -1498,10 +1546,13 @@
     var metricActiveTasks = document.getElementById("metric-active-tasks");
     var metricRecentCompleted = document.getElementById("metric-recent-completed");
     var metricSessions = document.getElementById("metric-sessions");
-    if (metricAgents) metricAgents.textContent = String(data.agents.length);
-    if (metricActiveTasks) metricActiveTasks.textContent = String(data.active_tasks.length);
-    if (metricRecentCompleted) metricRecentCompleted.textContent = String(data.recent_completed.length);
-    if (metricSessions) metricSessions.textContent = String(data.sessions.length);
+    // 首次渲染真实数据时移除骨架占位类：class 只在还没拿到任何数据时挡住
+    // 数字，一旦有真实计数（哪怕是 0）就必须可见，而不是被骨架样式的
+    // color: transparent 一直盖住。
+    if (metricAgents) { metricAgents.classList.remove("skel"); metricAgents.textContent = String(data.agents.length); }
+    if (metricActiveTasks) { metricActiveTasks.classList.remove("skel"); metricActiveTasks.textContent = String(data.active_tasks.length); }
+    if (metricRecentCompleted) { metricRecentCompleted.classList.remove("skel"); metricRecentCompleted.textContent = String(data.recent_completed.length); }
+    if (metricSessions) { metricSessions.classList.remove("skel"); metricSessions.textContent = String(data.sessions.length); }
 
     renderActiveTasksTable(data.active_tasks);
     renderActivityFeed(buildRecentActivity(data));
