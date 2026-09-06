@@ -75,7 +75,7 @@ func emptyKanbanFixture(t *testing.T) string {
 	t.Helper()
 	return createCollectorFixture(t, func(db *sql.DB) {
 		mustExec(t, db, `CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, priority INTEGER NOT NULL, created_at INTEGER NOT NULL, started_at INTEGER, completed_at INTEGER, workspace_kind TEXT NOT NULL, branch_name TEXT, project_id TEXT, tenant TEXT, consecutive_failures INTEGER NOT NULL, worker_pid INTEGER, max_runtime_seconds INTEGER, last_heartbeat_at INTEGER, current_run_id INTEGER, block_kind TEXT)`)
-		mustExec(t, db, `CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, profile TEXT, step_key TEXT, status TEXT NOT NULL, worker_pid INTEGER, max_runtime_seconds INTEGER, last_heartbeat_at INTEGER, started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT)`)
+		mustExec(t, db, `CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, profile TEXT, step_key TEXT, status TEXT NOT NULL, worker_pid INTEGER, max_runtime_seconds INTEGER, last_heartbeat_at INTEGER, started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT, session_id TEXT)`)
 	})
 }
 
@@ -101,6 +101,29 @@ func insertSentinelSessionWithText(t *testing.T, db *sql.DB, id string, title, m
 		id, title, "cli", model, profileName,
 		startedAt, endedAt, lastActivityAt,
 		3, 2, 100, 200, 10, 20, 5, 1, 0, hidden,
+		"SECRET-USER-ID", "SECRET-CHAT-ID", "SECRET-THREAD-ID", "SECRET-SESSION-KEY",
+		`{"leak":"origin"}`, "SECRET-SYSTEM-PROMPT", "/Users/secret/project",
+		"secret-branch", "https://billing.example.com/secret", "did something secret", 12.34,
+	)
+}
+
+// insertSentinelUnpinnedSession 与 insertSentinelSession 相同，但显式插入
+// pinned = 0，用于需要区分置顶/未置顶会话行为的测试（例如未置顶会话的
+// 200 条上限只应用于未置顶会话，不应影响置顶会话）。
+func insertSentinelUnpinnedSession(t *testing.T, db *sql.DB, id string, startedAt, endedAt, lastActivityAt any, hidden int) {
+	t.Helper()
+	mustExec(t, db, `
+		INSERT INTO sessions (
+			id, title, source, model, profile_name, started_at, ended_at, last_activity_at,
+			message_count, tool_call_count, input_tokens, output_tokens, cache_read_tokens,
+			cache_write_tokens, reasoning_tokens, pinned, archived, hidden,
+			user_id, chat_id, thread_id, session_key, origin_json, system_prompt, cwd,
+			git_branch, billing_url, last_activity_description, cost_usd
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		id, "标题 title", "cli", "gpt-5", "default",
+		startedAt, endedAt, lastActivityAt,
+		3, 2, 100, 200, 10, 20, 5, 0, 0, hidden,
 		"SECRET-USER-ID", "SECRET-CHAT-ID", "SECRET-THREAD-ID", "SECRET-SESSION-KEY",
 		`{"leak":"origin"}`, "SECRET-SYSTEM-PROMPT", "/Users/secret/project",
 		"secret-branch", "https://billing.example.com/secret", "did something secret", 12.34,
@@ -215,7 +238,13 @@ func TestSQLiteCollectorMapsNullOptionalTextColumnsToEmptyString(t *testing.T) {
 				}
 				return v.(string)
 			}
-			if want := wantString(tt.title); s.Title != want {
+			// title 为 NULL 时，Title 不再保持空字符串：deriveSessionTitle 会
+			// 回退到"来源 + 本地格式化开始时间"，保证会话标题永不为空。
+			if tt.title == nil {
+				if !strings.HasPrefix(s.Title, "CLI 会话 · ") {
+					t.Errorf("Title = %q, want fallback title with CLI prefix when title column is NULL", s.Title)
+				}
+			} else if want := wantString(tt.title); s.Title != want {
 				t.Errorf("Title = %q, want %q", s.Title, want)
 			}
 			if want := wantString(tt.model); s.Model != want {
@@ -258,7 +287,7 @@ func TestSQLiteCollectorCapsSessionsAt200OrderedByNewestActivity(t *testing.T) {
 		mustExec(t, db, sessionSchemaWithSentinels)
 		base := int64(1700000000)
 		for i := range 205 {
-			insertSentinelSession(t, db, sessionIDFor(i), float64(base+int64(i)), nil, nil, 0)
+			insertSentinelUnpinnedSession(t, db, sessionIDFor(i), float64(base+int64(i)), nil, nil, 0)
 		}
 	})
 
