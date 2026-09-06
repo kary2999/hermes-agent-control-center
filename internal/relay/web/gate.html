@@ -1,35 +1,120 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Verification</title>
+<title>访问验证</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f0d;
+    --panel: #111815;
+    --border: #26332d;
+    --text: #f4f7f5;
+    --muted: #9aa7a0;
+    --brand: #33d17a;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  main {
+    width: min(420px, 100%);
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--panel);
+  }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  p { margin: 0 0 18px; color: var(--muted); line-height: 1.6; }
+  label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 13px; }
+  input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #070a09;
+    color: var(--text);
+    padding: 12px 14px;
+    font-size: 16px;
+    outline: none;
+  }
+  input:focus { border-color: var(--brand); }
+  button {
+    width: 100%;
+    margin-top: 14px;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--brand);
+    color: #041008;
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .status { min-height: 22px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .status.error { color: var(--danger); }
+</style>
 </head>
 <body>
-<p>Verifying access&hellip;</p>
+<main>
+  <h1>访问验证</h1>
+  <p id="intro">请输入访问码。验证成功后会停留在当前域名并进入页面。</p>
+  <form id="access-form" autocomplete="off">
+    <label for="access-token">访问码</label>
+    <input id="access-token" name="access-token" type="password" inputmode="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="输入访问码">
+    <button id="submit-button" type="submit">进入工作台</button>
+  </form>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+</main>
 <script>
 (function () {
-  var REDIRECT_URL = "{{.RedirectURL}}";
   // 只接受形似 token 的字符集/长度，纯粹是提前过滤明显错误的
   // fragment，不代表安全校验——真正的校验只在服务端做。
   var TOKEN_PATTERN = /^[A-Za-z0-9._-]{8,512}$/;
+  var form = document.getElementById('access-form');
+  var input = document.getElementById('access-token');
+  var button = document.getElementById('submit-button');
+  var status = document.getElementById('status');
 
-  function redirectAway() {
-    window.location.replace(REDIRECT_URL);
+  function setStatus(message, isError) {
+    status.textContent = message || '';
+    status.className = isError ? 'status error' : 'status';
+  }
+
+  function setBusy(isBusy) {
+    button.disabled = isBusy;
+    button.textContent = isBusy ? '验证中…' : '进入工作台';
   }
 
   function exchangeToken(token) {
+    if (!TOKEN_PATTERN.test(token)) {
+      setStatus('访问码格式不正确，请重新输入。', true);
+      input.focus();
+      return;
+    }
+    setBusy(true);
+    setStatus('正在验证…', false);
     fetch('/api/v1/session', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token }
     }).then(function (res) {
       if (!res.ok) {
-        redirectAway();
+        setStatus('访问码无效或已过期，请重新输入。', true);
+        setBusy(false);
+        input.select();
         return;
       }
       window.location.replace('/workbench');
     }).catch(function () {
-      redirectAway();
+      setStatus('网络异常，请稍后重试。', true);
+      setBusy(false);
     });
   }
 
@@ -40,18 +125,17 @@
   var hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   var fragmentToken = hashParams.get('access_token');
 
-  if (fragmentToken && TOKEN_PATTERN.test(fragmentToken)) {
+  if (fragmentToken) {
     history.replaceState(null, '', window.location.pathname + window.location.search);
-    exchangeToken(fragmentToken);
+    exchangeToken(fragmentToken.trim());
     return;
   }
 
-  var token = window.prompt('Enter access code:');
-  if (!token || !token.trim()) {
-    redirectAway();
-    return;
-  }
-  exchangeToken(token.trim());
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    exchangeToken(input.value.trim());
+  });
+  input.focus();
 })();
 </script>
 </body>

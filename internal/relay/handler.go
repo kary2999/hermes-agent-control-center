@@ -149,13 +149,13 @@ func (h *Handler) requireSessionOrBearer(next http.HandlerFunc) http.HandlerFunc
 }
 
 // requireSession guards the human-facing dashboard page: only a valid
-// session cookie is accepted. Anything else is sent to the configured
-// external redirect rather than shown a 401, matching the gate page's own
-// failure path.
+// session cookie is accepted. Anything else is sent back to the same-origin
+// gate page so Lark Web App users stay on hermes.ikarp.top instead of being
+// bounced to the public blog.
 func (h *Handler) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.hasValidSession(r) {
-			http.Redirect(w, r, h.redirectURL, http.StatusFound)
+			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
 		next(w, r)

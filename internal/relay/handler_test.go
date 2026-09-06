@@ -165,28 +165,23 @@ func TestGateContentSecurityPolicyFrameAncestorsSources(t *testing.T) {
 	}
 }
 
-func TestHandleGateEmbedsConfiguredRedirectAndFallbackFlow(t *testing.T) {
+func TestHandleGateStaysOnSameOriginForManualAccess(t *testing.T) {
 	h := newTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	resp := doRequest(h, req)
 	body := readBody(t, resp)
 
-	// html/template JS-escapes "/" as "\/" inside the inline <script> string
-	// context, so compare against that form rather than the raw URL.
-	escapedRedirectURL := strings.ReplaceAll(testRedirectURL, "/", `\/`)
-	if !strings.Contains(body, escapedRedirectURL) {
-		t.Errorf("gate page does not embed configured redirect url %q (want %q in body):\n%s", testRedirectURL, escapedRedirectURL, body)
+	if strings.Contains(body, testRedirectURL) || strings.Contains(body, "window.prompt") || strings.Contains(body, "redirectAway") {
+		t.Fatalf("gate page must not auto-prompt or redirect users away from hermes host:\n%s", body)
 	}
-	if !strings.Contains(body, "window.prompt") {
-		t.Error("gate page script does not prompt for a token")
+	if !strings.Contains(body, "id=\"access-form\"") || !strings.Contains(body, "访问码") {
+		t.Errorf("gate page must render an in-page access form instead of leaving the host:\n%s", body)
 	}
 	if !strings.Contains(body, "/api/v1/session") {
 		t.Error("gate page script does not call POST /api/v1/session")
 	}
-	// Cancel/empty-token and verification-failure paths must both lead back
-	// to the same redirect entry point.
-	if strings.Count(body, "redirectAway()") < 3 {
-		t.Errorf("gate page script must call redirectAway() from the cancel/empty path, the failed-verification path, and the network-error path; got %d calls", strings.Count(body, "redirectAway()"))
+	if !strings.Contains(body, "访问码无效或已过期") || !strings.Contains(body, "网络异常") {
+		t.Error("gate page must show inline verification failure messages instead of redirecting away")
 	}
 }
 
@@ -333,7 +328,7 @@ func TestPostSessionRejectsBadCredentials(t *testing.T) {
 
 // --- 3. GET /dashboard session protection ---
 
-func TestDashboardPageRejectsMissingOrForgedSession(t *testing.T) {
+func TestDashboardPageRedirectsMissingOrForgedSessionToSameOriginGate(t *testing.T) {
 	h := newTestHandler(t)
 	otherHandler := newTestHandlerWithToken(t, "a-completely-different-token")
 
@@ -373,8 +368,8 @@ func TestDashboardPageRejectsMissingOrForgedSession(t *testing.T) {
 			if resp.StatusCode != http.StatusFound {
 				t.Fatalf("status = %d, want 302", resp.StatusCode)
 			}
-			if loc := resp.Header.Get("Location"); loc != testRedirectURL {
-				t.Errorf("Location = %q, want %q", loc, testRedirectURL)
+			if loc := resp.Header.Get("Location"); loc != "/" {
+				t.Errorf("Location = %q, want %q", loc, "/")
 			}
 		})
 	}
@@ -583,7 +578,7 @@ func TestHandleDashboardPageWriteFailureDoesNotPanicAndIsLogged(t *testing.T) {
 
 // --- 7. GET /workbench session protection (live-data workbench) ---
 
-func TestWorkbenchPageRejectsMissingOrForgedSession(t *testing.T) {
+func TestWorkbenchPageRedirectsMissingOrForgedSessionToSameOriginGate(t *testing.T) {
 	h := newTestHandler(t)
 
 	tamperedCookie := validSessionCookie(t, h)
@@ -609,8 +604,8 @@ func TestWorkbenchPageRejectsMissingOrForgedSession(t *testing.T) {
 			if resp.StatusCode != http.StatusFound {
 				t.Fatalf("status = %d, want 302", resp.StatusCode)
 			}
-			if loc := resp.Header.Get("Location"); loc != testRedirectURL {
-				t.Errorf("Location = %q, want %q", loc, testRedirectURL)
+			if loc := resp.Header.Get("Location"); loc != "/" {
+				t.Errorf("Location = %q, want %q", loc, "/")
 			}
 		})
 	}
