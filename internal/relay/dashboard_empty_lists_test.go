@@ -28,15 +28,18 @@ func TestBuildDashboardListFieldsAlwaysSerializeAsArraysNeverNull(t *testing.T) 
 			name:        "no snapshot yet",
 			hasSnapshot: false,
 			snap:        Snapshot{},
-			emptyFields: []string{"agents", "active_tasks", "recent_completed", "sessions"},
+			emptyFields: []string{"agents", "active_tasks", "recent_completed", "all_tasks", "sessions"},
 		},
 		{
 			name:        "snapshot with zero tasks and zero sessions",
 			hasSnapshot: true,
 			snap:        Snapshot{TakenAt: ts(100)},
-			emptyFields: []string{"agents", "active_tasks", "recent_completed", "sessions"},
+			emptyFields: []string{"agents", "active_tasks", "recent_completed", "all_tasks", "sessions"},
 		},
 		{
+			// Agent 现在按会话 model 聚合而非任务 assignee，因此非空会话下
+			// agents 不再是空数组——这与旧语义（Agent = 任务 assignee）刻意
+			// 相反，是本次工作台语义重写（approved semantics）的一部分。
 			name:        "snapshot with non-empty sessions but zero tasks",
 			hasSnapshot: true,
 			snap: Snapshot{
@@ -45,7 +48,7 @@ func TestBuildDashboardListFieldsAlwaysSerializeAsArraysNeverNull(t *testing.T) 
 					{ID: "sess-1", Title: "标题", StartedAt: ts(50)},
 				},
 			},
-			emptyFields: []string{"agents", "active_tasks", "recent_completed"},
+			emptyFields: []string{"active_tasks", "recent_completed", "all_tasks"},
 		},
 	}
 

@@ -57,7 +57,7 @@ func TestWorkbenchShowsSkeletonPlaceholdersBeforeFirstLoad(t *testing.T) {
 	if strings.Count(body, `id="metric-`) < 4 {
 		t.Fatal("expected 4 metric-value elements")
 	}
-	for _, id := range []string{"metric-agents", "metric-active-tasks", "metric-recent-completed", "metric-sessions"} {
+	for _, id := range []string{"metric-agents", "metric-total-tasks", "metric-recent-completed", "metric-sessions"} {
 		re := regexp.MustCompile(`id="` + id + `"[^>]*class="[^"]*\bskel\b`)
 		reAlt := regexp.MustCompile(`class="[^"]*\bskel\b[^"]*"\s+id="` + id + `"`)
 		if !re.MatchString(body) && !reAlt.MatchString(body) {
@@ -168,7 +168,7 @@ func TestWorkbenchNumericZeroFieldsNeverCollapseToDashPlaceholder(t *testing.T) 
 	numericFields := []string{
 		"message_count", "tool_call_count", "input_tokens", "output_tokens",
 		"cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
-		"unfinished_count", "running_count",
+		"total_session_count", "active_session_count",
 	}
 	for _, field := range numericFields {
 		if !strings.Contains(body, "String(session."+field+")") && !strings.Contains(body, "String(agent."+field+")") {
@@ -178,5 +178,79 @@ func TestWorkbenchNumericZeroFieldsNeverCollapseToDashPlaceholder(t *testing.T) 
 		if strings.Contains(body, dashPattern) {
 			t.Errorf("numeric field %q must not fall back to a dash on a legitimate zero value: found %q", field, dashPattern)
 		}
+	}
+}
+
+func TestWorkbenchUsesLatestUserPromptForSearchAndDetails(t *testing.T) {
+	body := workbenchBody(t)
+
+	for _, marker := range []string{
+		"session.last_user_prompt",
+		"session.last_user_prompt_at",
+		"最新用户提示",
+		"最新用户提示时间",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("workbench must expose latest sanitized user prompt metadata via %q", marker)
+		}
+	}
+}
+
+func TestWorkbenchShowsTruthfulDisabledLarkHandoffStatus(t *testing.T) {
+	body := workbenchBody(t)
+
+	for _, marker := range []string{
+		"lark_handoff_available",
+		"lark_handoff_reason",
+		"Lark 交接",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("workbench must render read-only Lark handoff capability status via %q", marker)
+		}
+	}
+}
+
+func TestWorkbenchRecentActivityContractLabelsAndSessionPromptSafety(t *testing.T) {
+	body := workbenchBody(t)
+
+	if strings.Contains(body, `typeLabel: "会话活动"`) || strings.Contains(body, "会话活动") {
+		t.Fatal("recent activity must never emit the generic 会话活动 label")
+	}
+	if !strings.Contains(body, `typeLabel: "用户发送提示词"`) {
+		t.Error("session activity must use 用户发送提示词 when latest user prompt metadata exists")
+	}
+	if !strings.Contains(body, "if (!session.last_user_prompt_at) return;") {
+		t.Error("session activity must only emit when last_user_prompt_at exists")
+	}
+	if !strings.Contains(body, `agent: session.model || "未知模型"`) {
+		t.Error("session activity must use session.model with 未知模型 fallback")
+	}
+	if !strings.Contains(body, `related: session.last_user_prompt || session.title`) {
+		t.Error("session activity related text must be limited to last_user_prompt/title")
+	}
+
+	if !strings.Contains(body, `typeLabel: "任务执行中"`) {
+		t.Error("running task activity label must be exactly 任务执行中")
+	}
+	if strings.Contains(body, `typeLabel: "任务进行中"`) {
+		t.Error("running task activity label must not use 任务进行中")
+	}
+
+	if !strings.Contains(body, `typeLabel: "任务失败"`) {
+		t.Error("failed task activity must emit 任务失败")
+	}
+	if !strings.Contains(body, `pillClass: "status-warn"`) {
+		t.Error("failed task activity must use warning state")
+	}
+}
+
+func TestWorkbenchAgentEmptyStateMentionsModelSessions(t *testing.T) {
+	body := workbenchBody(t)
+
+	if !strings.Contains(body, "暂无模型会话数据") {
+		t.Error("Agent empty state must say 暂无模型会话数据")
+	}
+	if strings.Contains(body, "暂无未完成任务分配给任何 Agent") {
+		t.Error("Agent empty state must not use task-assignment wording")
 	}
 }
