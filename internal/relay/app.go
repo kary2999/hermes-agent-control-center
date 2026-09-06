@@ -39,6 +39,7 @@ var (
 	// must only be reachable via a local HTTPS reverse proxy, never directly
 	// from the network.
 	ErrListenAddrNotLoopback = errors.New("listen address must be a loopback address (127.0.0.0/8 or ::1) with a valid port")
+	ErrTokenConflict         = errors.New("optional relay tokens must differ from token and each other")
 )
 
 // shutdownTimeout bounds how long Run waits for in-flight requests to
@@ -60,6 +61,9 @@ type Config struct {
 	// direct-open flow; the gate page's manual-prompt fallback (Token) still
 	// works.
 	DashboardToken string
+	// HandoffToken is an optional bearer token accepted only by
+	// POST /api/v1/session to mint a handoff-scoped browser cookie.
+	HandoffToken string
 	// DataDir is the directory the Relay uses for persistent storage.
 	DataDir string
 	// ReadTimeout bounds how long reading a request may take.
@@ -83,6 +87,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Token) == "" {
 		return ErrTokenRequired
 	}
+	if err := validateDistinctTokens(c.Token, c.DashboardToken, c.HandoffToken); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return ErrDataDirRequired
 	}
@@ -98,6 +105,22 @@ func (c Config) Validate() error {
 	redirectURL, err := url.Parse(c.UnauthorizedRedirectURL)
 	if err != nil || (redirectURL.Scheme != "http" && redirectURL.Scheme != "https") || redirectURL.Host == "" {
 		return ErrRedirectURLInvalid
+	}
+	return nil
+}
+
+func validateDistinctTokens(token, dashboardToken, handoffToken string) error {
+	token = strings.TrimSpace(token)
+	dashboardToken = strings.TrimSpace(dashboardToken)
+	handoffToken = strings.TrimSpace(handoffToken)
+	if dashboardToken != "" && dashboardToken == token {
+		return ErrTokenConflict
+	}
+	if handoffToken != "" && handoffToken == token {
+		return ErrTokenConflict
+	}
+	if dashboardToken != "" && handoffToken != "" && dashboardToken == handoffToken {
+		return ErrTokenConflict
 	}
 	return nil
 }
@@ -131,7 +154,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("relay: invalid config: %w", err)
 	}
 	store := NewSnapshotStore()
-	handler, err := NewHandler(store, cfg.Token, cfg.DashboardToken, cfg.UnauthorizedRedirectURL, logger)
+	handler, err := NewHandler(store, cfg.Token, cfg.DashboardToken, cfg.HandoffToken, cfg.UnauthorizedRedirectURL, logger, cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
 	}

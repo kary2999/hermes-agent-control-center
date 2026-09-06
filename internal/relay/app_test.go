@@ -117,6 +117,31 @@ func TestConfigValidateListenAddrLoopbackOnly(t *testing.T) {
 	}
 }
 
+func TestConfigValidateOptionalTokensMustBeDistinct(t *testing.T) {
+	base := Config{ListenAddr: "127.0.0.1:8443", Token: "relay-token", DataDir: "/tmp/hermes-relay", ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, UnauthorizedRedirectURL: "https://example.com"}
+	cases := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{name: "empty optional tokens valid", mutate: func(*Config) {}, wantErr: false},
+		{name: "distinct optional tokens valid", mutate: func(c *Config) { c.DashboardToken = "dashboard-token"; c.HandoffToken = "handoff-token" }, wantErr: false},
+		{name: "dashboard equals token", mutate: func(c *Config) { c.DashboardToken = "relay-token" }, wantErr: true},
+		{name: "handoff equals token", mutate: func(c *Config) { c.HandoffToken = "relay-token" }, wantErr: true},
+		{name: "dashboard equals handoff", mutate: func(c *Config) { c.DashboardToken = "shared-optional"; c.HandoffToken = "shared-optional" }, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	_, err := New(Config{}, testLogger())
 	if err == nil {

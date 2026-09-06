@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	// [skill: go-team-standards · HTTP handler · 安全认证] relay session scopes
 	// sessionCookieName is the cookie set by POST /api/v1/session and
 	// required by GET /dashboard.
 	sessionCookieName = "hermes_session"
@@ -18,7 +19,9 @@ const (
 	sessionTTL = 12 * time.Hour
 	// sessionKeyContext domain-separates the session signing key from any
 	// other HMAC derived from the shared token.
-	sessionKeyContext = "hermes-relay-session-v1"
+	sessionKeyContext   = "hermes-relay-session-v1"
+	sessionScopeRead    = "read"
+	sessionScopeHandoff = "read+handoff"
 )
 
 // deriveSessionKey derives a session-signing key from the shared Connector
@@ -33,7 +36,11 @@ func deriveSessionKey(token string) []byte {
 // signSessionValue produces an opaque "<expiry>.<hmac>" cookie value: the
 // session's Unix expiry timestamp plus its HMAC-SHA256 signature under key.
 func signSessionValue(key []byte, expiresAt time.Time) string {
-	payload := strconv.FormatInt(expiresAt.Unix(), 10)
+	return signSessionValueScope(key, expiresAt, sessionScopeRead)
+}
+
+func signSessionValueScope(key []byte, expiresAt time.Time, scope string) string {
+	payload := strconv.FormatInt(expiresAt.Unix(), 10) + "." + scope
 	return payload + "." + sessionSignature(key, payload)
 }
 
@@ -42,19 +49,39 @@ func signSessionValue(key []byte, expiresAt time.Time) string {
 // constant-time to avoid leaking timing information to an attacker
 // submitting forged cookies.
 func verifySessionValue(key []byte, value string, now time.Time) bool {
-	payload, sig, ok := strings.Cut(value, ".")
-	if !ok || payload == "" || sig == "" {
-		return false
+	_, ok := verifySessionValueScope(key, value, now)
+	return ok
+}
+
+func verifySessionValueScope(key []byte, value string, now time.Time) (string, bool) {
+	lastDot := strings.LastIndex(value, ".")
+	if lastDot < 0 {
+		return "", false
+	}
+	payload, sig := value[:lastDot], value[lastDot+1:]
+	if payload == "" || sig == "" {
+		return "", false
 	}
 	expected := sessionSignature(key, payload)
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return false
+		return "", false
 	}
-	expiresAtUnix, err := strconv.ParseInt(payload, 10, 64)
+	expiresText, scope, ok := strings.Cut(payload, ".")
+	if !ok {
+		expiresText = payload
+		scope = sessionScopeRead
+	}
+	expiresAtUnix, err := strconv.ParseInt(expiresText, 10, 64)
 	if err != nil {
-		return false
+		return "", false
 	}
-	return now.Before(time.Unix(expiresAtUnix, 0))
+	if !now.Before(time.Unix(expiresAtUnix, 0)) {
+		return "", false
+	}
+	if scope != sessionScopeRead && scope != sessionScopeHandoff {
+		return "", false
+	}
+	return scope, true
 }
 
 func sessionSignature(key []byte, payload string) string {
