@@ -42,6 +42,9 @@ type TaskRun struct {
 	StartedAt         time.Time  `json:"started_at"`
 	EndedAt           *time.Time `json:"ended_at,omitempty"`
 	Outcome           string     `json:"outcome,omitempty"`
+	// SessionID 关联本次运行所使用的 Hermes 会话（sessions.id），用于把任务
+	// 的"负责 Agent"（模型）从其所绑定的会话反查出来，而不是依赖 assignee。
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // SessionSummary 逐字段镜像 Connector 的脱敏会话契约
@@ -69,13 +72,24 @@ type SessionSummary struct {
 	ReasoningTokens  int64      `json:"reasoning_tokens"`
 	Pinned           bool       `json:"pinned"`
 	Archived         bool       `json:"archived"`
+	// LastUserPrompt 是该会话最新一条"活跃" role=user 消息的脱敏、有界预览。
+	LastUserPrompt string `json:"last_user_prompt,omitempty"`
+	// LastUserPromptAt 是上述预览对应消息的时间戳。
+	LastUserPromptAt *time.Time `json:"last_user_prompt_at,omitempty"`
+	HandoffState     string     `json:"handoff_state,omitempty"`
+	HandoffPlatform  string     `json:"handoff_platform,omitempty"`
 }
 
 type Snapshot struct {
-	TakenAt  time.Time        `json:"taken_at"`
-	Tasks    []AgentTask      `json:"tasks"`
-	Runs     []TaskRun        `json:"runs"`
-	Sessions []SessionSummary `json:"sessions"`
+	TakenAt      time.Time        `json:"taken_at"`
+	Tasks        []AgentTask      `json:"tasks"`
+	Runs         []TaskRun        `json:"runs"`
+	Sessions     []SessionSummary `json:"sessions"`
+	Capabilities Capabilities     `json:"capabilities"`
+}
+
+type Capabilities struct {
+	LarkHandoff bool `json:"lark_handoff"`
 }
 
 // SnapshotPayload is the request body decoded from POST /api/v1/snapshot.
