@@ -52,6 +52,32 @@ func TestLoadConfigDefaultsTimeouts(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsDefaultPage(t *testing.T) {
+	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
+	t.Setenv("HERMES_DEFAULT_PAGE", "/reports/daily")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if cfg.DefaultPage != "/reports/daily" {
+		t.Errorf("DefaultPage = %q, want %q", cfg.DefaultPage, "/reports/daily")
+	}
+}
+
+func TestLoadConfigRejectsUnsafeDefaultPage(t *testing.T) {
+	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "127.0.0.1:8443")
+	t.Setenv("HERMES_RELAY_TOKEN", "test-token")
+	t.Setenv("HERMES_UNAUTHORIZED_REDIRECT_URL", "https://example.com")
+	t.Setenv("HERMES_DEFAULT_PAGE", "https://evil.example")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() with unsafe default page: expected error, got nil")
+	}
+}
+
 func TestLoadConfigMissingListenAddrFails(t *testing.T) {
 	t.Setenv("HERMES_RELAY_LISTEN_ADDR", "")
 	t.Setenv("HERMES_RELAY_TOKEN", "test-token")

@@ -111,7 +111,7 @@
         input.select();
         return;
       }
-      window.location.replace('/workbench');
+      window.location.replace('{{ .DefaultPage }}');
     }).catch(function () {
       setStatus('网络异常，请稍后重试。', true);
       setBusy(false);

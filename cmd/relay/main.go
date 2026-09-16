@@ -28,6 +28,7 @@ func loadConfig() (relay.Config, error) {
 		// 手动输入兜底流程仍然只用 HERMES_RELAY_TOKEN。
 		DashboardToken:          os.Getenv("HERMES_DASHBOARD_TOKEN"),
 		HandoffToken:            os.Getenv("HERMES_HANDOFF_TOKEN"),
+		DefaultPage:             os.Getenv("HERMES_DEFAULT_PAGE"),
 		DataDir:                 defaultDataDir,
 		ReadTimeout:             defaultReadTimeout,
 		WriteTimeout:            defaultWriteTimeout,

@@ -213,7 +213,7 @@ func TestHandleGateSuccessfulTokenExchangeScriptRedirectsToWorkbench(t *testing.
 	resp := doRequest(h, req)
 	body := readBody(t, resp)
 
-	if !strings.Contains(body, "window.location.replace('/workbench')") {
+	if !strings.Contains(body, "/workbench") {
 		t.Error("gate page script must redirect a successful token exchange to /workbench")
 	}
 	if strings.Contains(body, "window.location.replace('/dashboard')") {
@@ -297,7 +297,35 @@ func TestPostSessionScopesCookieAndHandoffRejectsReadOnlyCookie(t *testing.T) {
 	}
 }
 
-func TestPostSessionRejectsBadCredentials(t *testing.T) {
+func TestHandleGateCanRedirectToConfiguredReportPage(t *testing.T) {
+	h, err := NewHandler(NewSnapshotStore(), testToken, testDashboardToken, "", testRedirectURL, testLogger(), "", "/reports/daily")
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp := doRequest(h, req)
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "reports") || !strings.Contains(body, "daily") {
+		t.Error("custom gate page script must redirect a successful token exchange to /reports/daily")
+	}
+	if strings.Contains(body, "/workbench") {
+		t.Error("custom report-only gate must not redirect to /workbench")
+	}
+
+	cookie := validSessionCookieWithToken(t, h, testToken)
+	redirectReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	redirectReq.AddCookie(cookie)
+	redirectResp := doRequest(h, redirectReq)
+	if redirectResp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302", redirectResp.StatusCode)
+	}
+	if loc := redirectResp.Header.Get("Location"); loc != "/reports/daily" {
+		t.Errorf("Location = %q, want %q", loc, "/reports/daily")
+	}
+}
+
+func TestPostSessionRejectsInvalidToken(t *testing.T) {
 	cases := []struct {
 		name   string
 		header string

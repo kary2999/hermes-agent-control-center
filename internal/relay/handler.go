@@ -48,6 +48,7 @@ type Handler struct {
 	dashboardToken string
 	handoffToken   string
 	redirectURL    string
+	defaultPage    string
 	sessionKey     []byte
 	gatePage       []byte
 	logger         *slog.Logger
@@ -61,8 +62,12 @@ type Handler struct {
 // exchange only, and sending unauthenticated or failed-verification browser
 // requests to redirectURL. It returns an error if the embedded gate page
 // template fails to render.
-func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redirectURL string, logger *slog.Logger, dataDir string) (*Handler, error) {
-	gatePage, err := renderGatePage(redirectURL)
+func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redirectURL string, logger *slog.Logger, dataDir string, defaultPage ...string) (*Handler, error) {
+	page := "/workbench"
+	if len(defaultPage) > 0 && strings.TrimSpace(defaultPage[0]) != "" {
+		page = strings.TrimSpace(defaultPage[0])
+	}
+	gatePage, err := renderGatePage(redirectURL, page)
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
 	}
@@ -79,6 +84,7 @@ func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redir
 		dashboardToken: dashboardToken,
 		handoffToken:   handoffToken,
 		redirectURL:    redirectURL,
+		defaultPage:    page,
 		sessionKey:     deriveSessionKey(token),
 		gatePage:       gatePage,
 		logger:         logger,
@@ -89,13 +95,16 @@ func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redir
 
 // renderGatePage renders the generic, product-agnostic gate page once at
 // startup, substituting redirectURL into the embedded template.
-func renderGatePage(redirectURL string) ([]byte, error) {
+func renderGatePage(redirectURL, defaultPage string) ([]byte, error) {
 	tmpl, err := template.New("gate").Parse(gatePageTemplateSource)
 	if err != nil {
 		return nil, fmt.Errorf("parse gate page template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, struct{ RedirectURL string }{RedirectURL: redirectURL}); err != nil {
+	if err := tmpl.Execute(&buf, struct {
+		RedirectURL string
+		DefaultPage string
+	}{RedirectURL: redirectURL, DefaultPage: defaultPage}); err != nil {
 		return nil, fmt.Errorf("render gate page template: %w", err)
 	}
 	return buf.Bytes(), nil
@@ -258,11 +267,11 @@ func matchesBearer(r *http.Request, want string) bool {
 // script collects a token, exchanges it for a session via
 // POST /api/v1/session, and sends any cancellation or failure to the
 // configured external redirect. A request that already carries a valid
-// session cookie is sent straight to /workbench instead of being prompted
+// session cookie is sent straight to the configured default page instead of being prompted
 // again.
 func (h *Handler) handleGate(w http.ResponseWriter, r *http.Request) {
 	if h.hasValidSession(r) {
-		http.Redirect(w, r, "/workbench", http.StatusFound)
+		http.Redirect(w, r, h.defaultPage, http.StatusFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

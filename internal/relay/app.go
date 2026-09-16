@@ -34,6 +34,9 @@ var (
 	// ErrRedirectURLInvalid is returned when Config.UnauthorizedRedirectURL is not
 	// an absolute http or https URL.
 	ErrRedirectURLInvalid = errors.New("unauthorized redirect url must be an absolute http or https url")
+	// ErrDefaultPageInvalid is returned when Config.DefaultPage is not a safe
+	// same-origin absolute path.
+	ErrDefaultPageInvalid = errors.New("default page must be a same-origin absolute path")
 	// ErrListenAddrNotLoopback is returned when Config.ListenAddr is not a
 	// TCP loopback address (127.0.0.0/8 or ::1) with a valid port. The Relay
 	// must only be reachable via a local HTTPS reverse proxy, never directly
@@ -74,6 +77,10 @@ type Config struct {
 	// or failed-verification browser requests are sent to. It must be
 	// configured by the deployment; the Relay never hardcodes a destination.
 	UnauthorizedRedirectURL string
+	// DefaultPage is the same-origin page a successful gate/session exchange
+	// enters. Empty means /workbench for backwards compatibility; report-only
+	// deployments set it to /reports/daily.
+	DefaultPage string
 }
 
 // Validate reports whether the Config is complete and internally consistent.
@@ -106,7 +113,25 @@ func (c Config) Validate() error {
 	if err != nil || (redirectURL.Scheme != "http" && redirectURL.Scheme != "https") || redirectURL.Host == "" {
 		return ErrRedirectURLInvalid
 	}
+	if !isSafeSameOriginPath(c.effectiveDefaultPage()) {
+		return ErrDefaultPageInvalid
+	}
 	return nil
+}
+
+func (c Config) effectiveDefaultPage() string {
+	page := strings.TrimSpace(c.DefaultPage)
+	if page == "" {
+		return "/workbench"
+	}
+	return page
+}
+
+func isSafeSameOriginPath(path string) bool {
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return false
+	}
+	return !strings.ContainsAny(path, "\r\n")
 }
 
 func validateDistinctTokens(token, dashboardToken, handoffToken string) error {
@@ -154,7 +179,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("relay: invalid config: %w", err)
 	}
 	store := NewSnapshotStore()
-	handler, err := NewHandler(store, cfg.Token, cfg.DashboardToken, cfg.HandoffToken, cfg.UnauthorizedRedirectURL, logger, cfg.DataDir)
+	handler, err := NewHandler(store, cfg.Token, cfg.DashboardToken, cfg.HandoffToken, cfg.UnauthorizedRedirectURL, logger, cfg.DataDir, cfg.effectiveDefaultPage())
 	if err != nil {
 		return nil, fmt.Errorf("relay: construct handler: %w", err)
 	}
