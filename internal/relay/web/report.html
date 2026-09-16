@@ -36,6 +36,7 @@
     .metric { grid-column: span 3; min-height: 120px; }
     .wide { grid-column: span 8; }
     .side { grid-column: span 4; }
+    .half { grid-column: span 6; }
     .label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
     .value { font-size: 34px; font-weight: 750; letter-spacing: -0.03em; }
     .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
@@ -54,9 +55,11 @@
     .item { padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; background: rgba(255,255,255,.025); }
     .item strong { display: block; margin-bottom: 4px; }
     .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+    .history { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    select { color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
     .skeleton { min-height: 80px; border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.09), rgba(255,255,255,.04)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
     @keyframes shimmer { to { background-position: -200% 0; } }
-    @media (max-width: 860px) { .metric, .wide, .side { grid-column: span 12; } table { display: block; overflow-x: auto; } }
+    @media (max-width: 860px) { .metric, .wide, .side, .half { grid-column: span 12; } table { display: block; overflow-x: auto; } }
   </style>
 </head>
 <body>
@@ -66,6 +69,7 @@
     <h1>每日进化报告</h1>
     <p class="subtitle">从控制中心实时快照生成：只展示脱敏后的 Agent、任务和会话状态，不展示 prompt、消息正文、Token 或密钥。</p>
     <div id="status" class="pill warn">正在读取快照…</div>
+    <div class="history"><label for="report-date" class="muted">历史日报</label><select id="report-date"><option value="">实时报告</option></select></div>
   </header>
 
   <section class="grid" id="metrics">
@@ -83,6 +87,14 @@
     <article class="card side">
       <h2>状态信号</h2>
       <div id="signals" class="list"><div class="skeleton"></div></div>
+    </article>
+    <article class="card half">
+      <h2>异常</h2>
+      <div id="anomaly" class="muted">实时报告尚未归档。</div>
+    </article>
+    <article class="card half">
+      <h2>下一步</h2>
+      <div id="next-step" class="muted">归档后生成明确行动建议。</div>
     </article>
     <article class="card wide">
       <h2>最近执行任务</h2>
@@ -117,7 +129,7 @@ function renderMetrics(data) {
   ];
   document.getElementById('metrics').innerHTML = metrics.map(([label, value, hint]) => `<article class="card metric"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${hint}</div></article>`).join('');
 }
-function renderConclusion(data) {
+function renderConclusion(data, report) {
   const tasks = data.all_tasks || [];
   const failed = tasks.filter(t => t.status === 'failed').length;
   const running = tasks.filter(t => t.is_running).length;
@@ -130,7 +142,10 @@ function renderConclusion(data) {
         ? `系统正在运行 ${running} 个任务；整体链路可见，优先观察是否按预期完成。`
         : `当前没有失败或执行中任务；Hermes 状态稳定，可以继续沉淀资料库和自动报告。`;
   }
+  if (report && report.conclusion) text = report.conclusion;
   document.getElementById('conclusion').innerHTML = `<p>${esc(text)}</p><p class="muted">最近任务记录：${recent.length} 条；快照设备：${esc(data.device_id || '未知')}</p>`;
+  document.getElementById('anomaly').textContent = report?.anomaly || '实时报告尚未归档；当前状态信号见右侧。';
+  document.getElementById('next-step').textContent = report?.next_step || '归档后生成明确行动建议。';
 }
 function renderSignals(data) {
   const stale = data.snapshot_received_at ? ((Date.now() - new Date(data.snapshot_received_at).getTime()) / 1000) : Infinity;
@@ -159,13 +174,29 @@ function renderSessions(data) {
 async function main() {
   const status = document.getElementById('status');
   try {
-    const res = await fetch('/api/v1/dashboard', { credentials: 'same-origin' });
+    const params = new URLSearchParams(window.location.search);
+    const selectedDate = params.get('date') || '';
+    const indexRes = await fetch('/api/v1/reports/daily', { credentials: 'same-origin' });
+    if (indexRes.ok) {
+      const index = await indexRes.json();
+      const select = document.getElementById('report-date');
+      (index.dates || []).forEach(date => select.insertAdjacentHTML('beforeend', `<option value="${esc(date)}">${esc(date)}</option>`));
+      select.value = selectedDate;
+      select.addEventListener('change', () => {
+        const next = select.value ? `/reports/daily?date=${encodeURIComponent(select.value)}` : '/reports/daily';
+        window.location.assign(next);
+      });
+    }
+    const endpoint = selectedDate ? `/api/v1/reports/daily/${encodeURIComponent(selectedDate)}` : '/api/v1/dashboard';
+    const res = await fetch(endpoint, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderMetrics(data); renderConclusion(data); renderSignals(data); renderTasks(data); renderAgents(data); renderSessions(data);
+    const payload = await res.json();
+    const report = selectedDate ? payload : null;
+    const data = report ? report.dashboard : payload;
+    renderMetrics(data); renderConclusion(data, report); renderSignals(data); renderTasks(data); renderAgents(data); renderSessions(data);
     status.className = 'pill ok';
-    status.textContent = data.has_snapshot ? '实时快照已加载' : '等待 Connector 快照';
-    document.getElementById('footer').textContent = `生成时间：${fmtTime(data.generated_at)} · 快照时间：${fmtTime(data.snapshot_taken_at)} · 接收时间：${fmtTime(data.snapshot_received_at)}`;
+    status.textContent = report ? `${report.date} 历史日报` : (data.has_snapshot ? '实时快照已加载' : '等待 Connector 快照');
+    document.getElementById('footer').textContent = `生成时间：${fmtTime(report?.generated_at || data.generated_at)} · 快照时间：${fmtTime(data.snapshot_taken_at)} · 接收时间：${fmtTime(data.snapshot_received_at)}`;
   } catch (err) {
     status.className = 'pill warn';
     status.textContent = '读取失败';

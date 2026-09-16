@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>top.ikarp.hermes-daily-report</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/karp/.config/hermes-report/publish_daily_report.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>23</integer>
+    <key>Minute</key><integer>55</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/karp/.local/state/hermes-report/publisher.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/karp/.local/state/hermes-report/publisher-error.log</string>
+</dict>
+</plist>

@@ -5,12 +5,14 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -54,6 +56,7 @@ type Handler struct {
 	logger         *slog.Logger
 	now            func() time.Time
 	handoffStore   *HandoffStore
+	reportStore    *DailyReportStore
 }
 
 // NewHandler constructs a Handler backed by store, authenticating
@@ -78,6 +81,13 @@ func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redir
 			return nil, fmt.Errorf("construct handoff store: %w", err)
 		}
 	}
+	var reportStore *DailyReportStore
+	if dataDir != "" {
+		reportStore, err = NewDailyReportStore(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("construct daily report store: %w", err)
+		}
+	}
 	return &Handler{
 		store:          store,
 		token:          token,
@@ -90,6 +100,7 @@ func NewHandler(store *SnapshotStore, token, dashboardToken, handoffToken, redir
 		logger:         logger,
 		now:            time.Now,
 		handoffStore:   handoffStore,
+		reportStore:    reportStore,
 	}, nil
 }
 
@@ -120,6 +131,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /reports/daily", h.requireSession(h.handleDailyReportPage))
 	mux.HandleFunc("GET /reports/today", h.requireSession(h.handleDailyReportPage))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
+	mux.HandleFunc("GET /api/v1/reports/daily", h.requireSessionOrBearer(h.handleGetDailyReportIndex))
+	mux.HandleFunc("POST /api/v1/reports/daily", h.requireAuth(h.handlePostDailyReport))
+	mux.HandleFunc("GET /api/v1/reports/daily/{date}", h.requireSessionOrBearer(h.handleGetDailyReport))
 	mux.HandleFunc("POST /api/v1/sessions/{session_id}/lark-handoff", h.requireHandoffSession(h.handlePostLarkHandoff))
 	mux.HandleFunc("POST /api/v1/handoff/claim", h.requireAuth(h.handlePostHandoffClaim))
 	mux.HandleFunc("POST /api/v1/handoff/result", h.requireAuth(h.handlePostHandoffResult))
@@ -478,7 +492,69 @@ func (h *Handler) handleDailyReportPage(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (h *Handler) handlePostDailyReport(w http.ResponseWriter, r *http.Request) {
+	if h.reportStore == nil {
+		http.Error(w, `{"error":"daily report store unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	defer r.Body.Close()
+	var body struct {
+		Date string `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid daily report payload"}`, http.StatusBadRequest)
+		return
+	}
+	report, err := BuildDailyReport(body.Date, h.currentDashboard(), h.now())
+	if err != nil {
+		http.Error(w, `{"error":"invalid report date"}`, http.StatusBadRequest)
+		return
+	}
+	if err := h.reportStore.Save(report); err != nil {
+		h.logger.Error("save daily report failed", slog.String("error", err.Error()))
+		http.Error(w, `{"error":"save daily report failed"}`, http.StatusInternalServerError)
+		return
+	}
+	h.writeJSON(w, http.StatusCreated, report)
+}
+
+func (h *Handler) handleGetDailyReportIndex(w http.ResponseWriter, _ *http.Request) {
+	if h.reportStore == nil {
+		http.Error(w, `{"error":"daily report store unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	dates, err := h.reportStore.ListDates()
+	if err != nil {
+		h.logger.Error("list daily reports failed", slog.String("error", err.Error()))
+		http.Error(w, `{"error":"list daily reports failed"}`, http.StatusInternalServerError)
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string][]string{"dates": dates})
+}
+
+func (h *Handler) handleGetDailyReport(w http.ResponseWriter, r *http.Request) {
+	if h.reportStore == nil {
+		http.Error(w, `{"error":"daily report store unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	report, err := h.reportStore.Load(r.PathValue("date"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			http.Error(w, `{"error":"daily report not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"invalid report date"}`, http.StatusBadRequest)
+		return
+	}
+	h.writeJSON(w, http.StatusOK, report)
+}
+
 func (h *Handler) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
+	h.writeJSON(w, http.StatusOK, h.currentDashboard())
+}
+
+func (h *Handler) currentDashboard() DashboardView {
 	deviceID, snap, receivedAt, has := h.store.Get()
 	view := BuildDashboardWithHandoff(deviceID, snap, receivedAt, has, h.now(), h.handoffToken != "")
 	if h.handoffStore != nil {
@@ -505,7 +581,7 @@ func (h *Handler) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	h.writeJSON(w, http.StatusOK, view)
+	return view
 }
 
 func (h *Handler) handlePostSnapshot(w http.ResponseWriter, r *http.Request) {
