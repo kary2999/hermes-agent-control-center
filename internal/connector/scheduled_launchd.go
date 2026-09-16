@@ -499,14 +499,11 @@ func ParseLaunchctlList(output []byte) []LaunchctlEntry {
 	return entries
 }
 
-// FetchLaunchctlStatus runs `/usr/bin/launchctl list` exactly once and
+// FetchLaunchctlStatus runs `/bin/launchctl list` exactly once and
 // returns the parsed entries keyed by label, so callers can look up many
-// jobs' status without spawning a process per job. On non-darwin platforms
-// it returns an empty map without invoking anything.
+// jobs' status without spawning a process per job. Platform selection belongs
+// to the caller; keeping this function platform-neutral makes fake-runner tests deterministic.
 func FetchLaunchctlStatus(ctx context.Context, runner CommandRunner) (map[string]LaunchctlEntry, error) {
-	if runtime.GOOS != "darwin" {
-		return map[string]LaunchctlEntry{}, nil
-	}
 	out, err := runner.Run(ctx, "/bin/launchctl", "list")
 	if err != nil {
 		return nil, fmt.Errorf("run launchctl list: %w", err)
@@ -674,9 +671,6 @@ var noCrontabMarkers = []string{"no crontab for", "cannot open"}
 // non-comment, non-blank line as a sanitized ScheduledTask. Absence of a
 // crontab is treated as an empty list, not an error.
 func CollectCrontab(ctx context.Context, runner CommandRunner) ([]ScheduledTask, error) {
-	if runtime.GOOS != "darwin" {
-		return []ScheduledTask{}, nil
-	}
 	out, err := runner.Run(ctx, "/usr/bin/crontab", "-l")
 	if err != nil {
 		if isNoCrontabError(err) {
@@ -729,9 +723,6 @@ func splitCronLine(line string) (schedule, command string) {
 // CollectAtQueue runs `/usr/bin/atq` once and returns each queued job as a
 // sanitized ScheduledTask. An empty queue is a normal empty list.
 func CollectAtQueue(ctx context.Context, runner CommandRunner) ([]ScheduledTask, error) {
-	if runtime.GOOS != "darwin" {
-		return []ScheduledTask{}, nil
-	}
 	out, err := runner.Run(ctx, "/usr/bin/atq")
 	if err != nil {
 		return nil, fmt.Errorf("run atq: %w", err)
