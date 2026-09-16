@@ -58,7 +58,7 @@ func TestCollectHermesCronJobs_SensitiveFieldsNeverLeak(t *testing.T) {
 				"id": "job-1",
 				"name": "Nightly Report",
 				"schedule": "0 2 * * *",
-				"prompt": "summarize /Users/alice/private/report.md, token=sk-should-be-redacted-1234567890",
+				"prompt": "summarize 路径：/Users/alice/private/report.md, token=sk-should-be-redacted-1234567890",
 				"enabled": true,
 				"state": "enabled",
 				"provider": "openai",

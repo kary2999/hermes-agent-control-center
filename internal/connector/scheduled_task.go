@@ -59,7 +59,7 @@ type ScheduledTask struct {
 // defaultUnnamedTaskName is used when a Hermes cron job has no usable name.
 const defaultUnnamedTaskName = "未命名定时任务"
 
-var localAbsolutePathPattern = regexp.MustCompile(`(^|[\s="'\(])(/[^\s"'<>]+)`)
+var localAbsolutePathPattern = regexp.MustCompile(`(^|[^A-Za-z0-9:/])(/[^\s"'<>]+)`)
 
 // maxCronJobsFileSize bounds how large a cron/jobs.json file we will read,
 // so a corrupt or hostile file cannot force unbounded memory use.
