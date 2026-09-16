@@ -112,6 +112,9 @@
   <div class="footer" id="footer">报告生成中…</div>
 </main>
 <script>
+if (window.location.hash) {
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+}
 const fmtTime = (v) => v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—';
 const esc = (s) => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const pct = (n) => Math.max(0, Math.min(100, Number(n || 0)));

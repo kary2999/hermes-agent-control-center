@@ -22,3 +22,11 @@ func TestDailyReportHTMLSupportsHistoricalDates(t *testing.T) {
 		}
 	}
 }
+
+func TestDailyReportHTML_RemovesAccessTokenFragment(t *testing.T) {
+	t.Parallel()
+	body := string(reportHTML)
+	if !strings.Contains(body, "history.replaceState(null, '', window.location.pathname + window.location.search)") {
+		t.Fatal("report HTML must remove URL fragments before loading report data")
+	}
+}
