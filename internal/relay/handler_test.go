@@ -644,6 +644,39 @@ func TestWorkbenchPageServesContentWithValidSessionAndFetchesLiveDashboardAPI(t 
 	}
 }
 
+func TestDailyReportPageRequiresSessionAndServesLiveHTMLReport(t *testing.T) {
+	h := newTestHandler(t)
+
+	unauthenticated := httptest.NewRequest(http.MethodGet, "/reports/daily", nil)
+	unauthenticatedResp := doRequest(h, unauthenticated)
+	if unauthenticatedResp.StatusCode != http.StatusFound {
+		t.Fatalf("unauthenticated status = %d, want 302", unauthenticatedResp.StatusCode)
+	}
+	if loc := unauthenticatedResp.Header.Get("Location"); loc != "/" {
+		t.Errorf("unauthenticated Location = %q, want %q", loc, "/")
+	}
+
+	cookie := validSessionCookie(t, h)
+	req := httptest.NewRequest(http.MethodGet, "/reports/daily", nil)
+	req.AddCookie(cookie)
+	resp := doRequest(h, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	body := readBody(t, resp)
+	for _, want := range []string{"每日进化报告", "/api/v1/dashboard", "prompt、消息正文、Token 或密钥"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("report page missing %q", want)
+		}
+	}
+	if strings.Contains(body, "window.prompt") {
+		t.Error("report page must not prompt for a shared token")
+	}
+}
+
 func TestWorkbenchPageFetchUsesAbortControllerWithTimeout(t *testing.T) {
 	h := newTestHandler(t)
 	cookie := validSessionCookie(t, h)

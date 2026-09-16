@@ -25,6 +25,9 @@ var dashboardHTML []byte
 //go:embed web/workbench.html
 var workbenchHTML []byte
 
+//go:embed web/report.html
+var reportHTML []byte
+
 // maxSnapshotBodyBytes bounds the size of an accepted POST /api/v1/snapshot
 // body, protecting the Relay from unbounded memory use on a malformed or
 // hostile request.
@@ -105,6 +108,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/session", h.handlePostSession)
 	mux.HandleFunc("GET /dashboard", h.requireSession(h.handleDashboardPage))
 	mux.HandleFunc("GET /workbench", h.requireSession(h.handleWorkbenchPage))
+	mux.HandleFunc("GET /reports/daily", h.requireSession(h.handleDailyReportPage))
+	mux.HandleFunc("GET /reports/today", h.requireSession(h.handleDailyReportPage))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
 	mux.HandleFunc("POST /api/v1/sessions/{session_id}/lark-handoff", h.requireHandoffSession(h.handlePostLarkHandoff))
 	mux.HandleFunc("POST /api/v1/handoff/claim", h.requireAuth(h.handlePostHandoffClaim))
@@ -450,6 +455,17 @@ func (h *Handler) handleWorkbenchPage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(workbenchHTML); err != nil {
 		h.logger.Error("write workbench page response failed", slog.String("error", err.Error()))
+	}
+}
+
+// handleDailyReportPage serves the mobile-friendly daily HTML report at
+// GET /reports/daily and /reports/today. It shares the dashboard session and
+// data API so reports stay read-only and never expose prompt/token content.
+func (h *Handler) handleDailyReportPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(reportHTML); err != nil {
+		h.logger.Error("write report page response failed", slog.String("error", err.Error()))
 	}
 }
 
