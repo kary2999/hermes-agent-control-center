@@ -131,6 +131,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /reports/daily", h.requireSession(h.handleDailyReportPage))
 	mux.HandleFunc("GET /reports/today", h.requireSession(h.handleDailyReportPage))
 	mux.HandleFunc("GET /api/v1/dashboard", h.requireSessionOrBearer(h.handleGetDashboard))
+	mux.HandleFunc("GET /api/v1/scheduled-tasks", h.requireSessionOrBearer(h.handleGetScheduledTasks))
 	mux.HandleFunc("GET /api/v1/reports/daily", h.requireSessionOrBearer(h.handleGetDailyReportIndex))
 	mux.HandleFunc("POST /api/v1/reports/daily", h.requireAuth(h.handlePostDailyReport))
 	mux.HandleFunc("GET /api/v1/reports/daily/{date}", h.requireSessionOrBearer(h.handleGetDailyReport))
@@ -552,6 +553,11 @@ func (h *Handler) handleGetDailyReport(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleGetDashboard(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.currentDashboard())
+}
+
+func (h *Handler) handleGetScheduledTasks(w http.ResponseWriter, r *http.Request) {
+	_, snap, _, has := h.store.Get()
+	h.writeJSON(w, http.StatusOK, BuildScheduledTasksView(snap, has, h.now()))
 }
 
 func (h *Handler) currentDashboard() DashboardView {

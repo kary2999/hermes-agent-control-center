@@ -88,6 +88,30 @@ type Snapshot struct {
 	Runs         []TaskRun        `json:"runs"`
 	Sessions     []SessionSummary `json:"sessions"`
 	Capabilities Capabilities     `json:"capabilities"`
+	// ScheduledTasks mirrors the Connector's ScheduledTask contract
+	// field-for-field: id, name, source, kind, instruction_preview,
+	// schedule_rule, status, last_run_at, last_exit_code. This struct has
+	// no fields to receive anything else, so any extra JSON keys the
+	// Connector might someday send are silently dropped by
+	// json.Unmarshal rather than being retained here.
+	ScheduledTasks []ScheduledTaskSnapshot `json:"scheduled_tasks"`
+}
+
+// ScheduledTaskSnapshot mirrors internal/connector.ScheduledTask
+// field-for-field. See ScheduledTaskView / BuildScheduledTaskViews for the
+// explicit, field-by-field mapping into the API response shape — this type
+// is only ever used to decode the incoming POST /api/v1/snapshot body, never
+// serialized directly to an HTTP response.
+type ScheduledTaskSnapshot struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Source             string `json:"source"`
+	Kind               string `json:"kind"`
+	InstructionPreview string `json:"instruction_preview,omitempty"`
+	ScheduleRule       string `json:"schedule_rule,omitempty"`
+	Status             string `json:"status"`
+	LastRunAt          *int64 `json:"last_run_at,omitempty"`
+	LastExitCode       *int   `json:"last_exit_code,omitempty"`
 }
 
 type Capabilities struct {

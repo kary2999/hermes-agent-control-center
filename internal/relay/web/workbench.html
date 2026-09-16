@@ -724,6 +724,9 @@
     <button class="nav-btn" type="button" data-nav="tasks">
       <span class="ico" aria-hidden="true">任</span> 任务
     </button>
+    <button class="nav-btn" type="button" data-nav="scheduled">
+      <span class="ico" aria-hidden="true">时</span> 定时任务
+    </button>
     <button class="nav-btn" type="button" data-nav="resources">
       <span class="ico" aria-hidden="true">源</span> 资源
     </button>
@@ -883,13 +886,39 @@
       </div>
     </section>
 
+    <!-- ========== 定时任务 ========== -->
+    <section class="page" id="page-scheduled" data-page="scheduled" hidden>
+      <div class="page-title">
+        <h1>定时任务</h1>
+        <span class="page-sub" id="scheduled-count-sub"></span>
+      </div>
+      <div class="status-banner" id="scheduled-status-banner" data-state="loading" role="status" hidden>
+        <span id="scheduled-status-banner-text">正在加载数据…</span>
+        <button type="button" class="status-retry-btn" id="scheduled-status-retry-btn" hidden>重试</button>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr><th>任务名称</th><th>任务指令</th><th>最后执行时间</th><th>定时器规则</th><th>状态</th></tr>
+          </thead>
+          <tbody id="scheduled-tasks-tbody">
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+            <tr data-skeleton="true" aria-hidden="true"><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td><td><span class="skel">&nbsp;</span></td></tr>
+          </tbody>
+        </table>
+        <div class="record-cards" id="scheduled-tasks-cards">
+          <article class="record-card" data-skeleton="true" aria-hidden="true"><div class="rc-top"><span class="skel">&nbsp;</span></div></article>
+        </div>
+      </div>
+    </section>
+
     <!-- ========== 资源 ========== -->
     <section class="page" id="page-resources" data-page="resources" hidden>
       <div class="page-title">
         <h1>资源</h1>
       </div>
       <div class="card">
-        <p>当前只读 API（GET /api/v1/dashboard）不提供资源数据：模型、技能、消息通道、定时任务均未开放查询，此页面不展示、也不推测任何相关信息。</p>
+        <p>当前只读 API（GET /api/v1/dashboard）不提供资源数据：模型、技能、消息通道均未开放查询，此页面不展示、也不推测任何相关信息。定时任务请见左侧“定时任务”页面。</p>
         <p>会话与任务的写操作（包括创建或绑定 Lark 话题）在本工作台中同样不可用；工作台仅用于只读查看 Connector 上报的快照数据。</p>
       </div>
     </section>
@@ -918,6 +947,9 @@
   </button>
   <button class="bottom-nav-btn" type="button" data-nav="tasks">
     <span class="ico" aria-hidden="true">任</span>任务
+  </button>
+  <button class="bottom-nav-btn" type="button" data-nav="scheduled">
+    <span class="ico" aria-hidden="true">时</span>定时
   </button>
   <button class="bottom-nav-btn" type="button" data-nav="resources">
     <span class="ico" aria-hidden="true">源</span>资源
@@ -984,7 +1016,9 @@
 
   navButtons.forEach(function (btn) {
     btn.addEventListener("click", function () {
-      activatePage(btn.getAttribute("data-nav"));
+      var name = btn.getAttribute("data-nav");
+      activatePage(name);
+      if (name === "scheduled") fetchScheduledTasks();
     });
   });
 
@@ -1802,6 +1836,204 @@
     }
     renderSessionList();
     renderSessionDetail(currentSessions.filter(function (s) { return s.id === activeSessionId; })[0] || null);
+  }
+
+  // ---- 定时任务（只读）----
+  // SCHEDULED_TASKS_RENDER_BEGIN — 本段函数不依赖本文件其余部分的任何全局
+  // 状态（只用 document.createElement / textContent，不用 innerHTML），供
+  // 单元测试通过正则提取后在独立的最小 fake DOM 里加载执行。
+
+  var SCHEDULED_TASKS_API_URL = "/api/v1/scheduled-tasks";
+  var scheduledTasksHasData = false;
+
+  function formatScheduledLastRun(unixSeconds) {
+    // last_run_at 为 0 是合法值（Epoch 时刻真的发生过一次执行），必须与
+    // "从未执行"的 null/undefined 严格区分，不能用 `!unixSeconds` 判断。
+    if (unixSeconds === null || unixSeconds === undefined) return "暂无执行记录";
+    var n = Number(unixSeconds);
+    if (!Number.isFinite(n)) return "暂无执行记录";
+    var d = new Date(n * 1000);
+    if (isNaN(d.getTime())) return "暂无执行记录";
+    function pad(x) { return x < 10 ? "0" + x : String(x); }
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function scheduledStatusLabel(status) {
+    switch (status) {
+      case "running": return "运行中";
+      case "disabled": return "已禁用";
+      case "failed": return "失败";
+      case "enabled": return "已启用";
+      default: return status || "未知";
+    }
+  }
+
+  function scheduledSourceLabel(source) {
+    switch (source) {
+      case "hermes_cron": return "Hermes Cron";
+      case "launchd": return "macOS launchd";
+      case "crontab": return "用户 Crontab";
+      case "at": return "at 队列";
+      default: return source || "未知来源";
+    }
+  }
+
+  function scheduledKindLabel(kind) {
+    switch (kind) {
+      case "cron": return "周期任务";
+      case "interval": return "定时任务";
+      case "resident": return "常驻服务";
+      case "login_item": return "开机启动";
+      case "path_watch": return "文件变化触发";
+      case "queue_watch": return "目录队列触发";
+      case "one_shot": return "单次任务";
+      default: return kind || "未分类";
+    }
+  }
+
+  // buildScheduledTaskRowCells 返回一行的 5 个单元格文本（任务名称/任务指令
+  // /最后执行时间/定时器规则/状态），供桌面表格与移动卡片共用同一套派生
+  // 逻辑，避免两处实现分叉。exitCode 单独返回，供状态列附加展示，
+  // exitCode === 0 时必须原样显示 "0"，不能因为它是 falsy 而被当成缺失。
+  function buildScheduledTaskRowCells(task) {
+    var status = scheduledStatusLabel(task.status);
+    if (task.last_exit_code !== null && task.last_exit_code !== undefined) {
+      status = status + "（退出码 " + String(task.last_exit_code) + "）";
+    }
+    return {
+      name: task.name || "未命名定时任务",
+      instruction: task.instruction_preview || "未提供任务指令",
+      lastRun: formatScheduledLastRun(task.last_run_at),
+      schedule: task.schedule_rule || "未设置执行规则",
+      status: status,
+      source: scheduledSourceLabel(task.source),
+      kind: scheduledKindLabel(task.kind)
+    };
+  }
+
+  function renderScheduledTasksTable(tasks) {
+    var tbody = document.getElementById("scheduled-tasks-tbody");
+    var cards = document.getElementById("scheduled-tasks-cards");
+    if (!tbody || !cards) return;
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    while (cards.firstChild) cards.removeChild(cards.firstChild);
+
+    if (!tasks || tasks.length === 0) {
+      var tr = document.createElement("tr");
+      var td = document.createElement("td");
+      td.setAttribute("colspan", "5");
+      td.textContent = "暂无定时任务";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+
+      var emptyCard = document.createElement("div");
+      emptyCard.className = "empty-state";
+      emptyCard.textContent = "暂无定时任务";
+      cards.appendChild(emptyCard);
+      return;
+    }
+
+    tasks.forEach(function (task) {
+      var cells = buildScheduledTaskRowCells(task);
+
+      var row = document.createElement("tr");
+      [cells.name + " · " + cells.source + " / " + cells.kind, cells.instruction, cells.lastRun, cells.schedule, cells.status].forEach(function (text) {
+        var cell = document.createElement("td");
+        cell.textContent = text;
+        row.appendChild(cell);
+      });
+      tbody.appendChild(row);
+
+      var card = document.createElement("article");
+      card.className = "record-card";
+
+      var top = document.createElement("div");
+      top.className = "rc-top";
+      var title = document.createElement("strong");
+      title.textContent = cells.name;
+      top.appendChild(title);
+      var tagWrap = document.createElement("span");
+      tagWrap.textContent = " [" + cells.source + " / " + cells.kind + "]";
+      top.appendChild(tagWrap);
+      card.appendChild(top);
+
+      var fields = [
+        ["任务指令", cells.instruction],
+        ["最后执行时间", cells.lastRun],
+        ["定时器规则", cells.schedule],
+        ["状态", cells.status]
+      ];
+      fields.forEach(function (pair) {
+        var line = document.createElement("div");
+        line.className = "rc-field";
+        var label = document.createElement("span");
+        label.className = "rc-label";
+        label.textContent = pair[0] + "：";
+        line.appendChild(label);
+        var value = document.createElement("span");
+        value.textContent = pair[1];
+        line.appendChild(value);
+        card.appendChild(line);
+      });
+
+      cards.appendChild(card);
+    });
+  }
+
+  // SCHEDULED_TASKS_RENDER_END
+
+  function setScheduledStatusBanner(state, text) {
+    var banner = document.getElementById("scheduled-status-banner");
+    var textEl = document.getElementById("scheduled-status-banner-text");
+    var retryBtn = document.getElementById("scheduled-status-retry-btn");
+    if (!banner) return;
+    if (state === "ok") {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.setAttribute("data-state", state);
+    if (textEl) textEl.textContent = text || "";
+    if (retryBtn) retryBtn.hidden = state !== "error" && state !== "stale";
+  }
+
+  function fetchScheduledTasks() {
+    setScheduledStatusBanner("loading", "正在加载数据…");
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS);
+    fetch(SCHEDULED_TASKS_API_URL, { credentials: "same-origin", signal: controller.signal })
+      .then(function (res) {
+        clearTimeout(timeoutId);
+        if (res.status === 401) {
+          window.location.replace("/");
+          return null;
+        }
+        if (!res.ok) throw new Error("unexpected_status");
+        return res.json();
+      })
+      .then(function (data) {
+        if (data === null) return;
+        var tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        renderScheduledTasksTable(tasks);
+        scheduledTasksHasData = true;
+        var sub = document.getElementById("scheduled-count-sub");
+        if (sub) sub.textContent = "共 " + tasks.length + " 条定时任务";
+        setScheduledStatusBanner("ok");
+      })
+      .catch(function () {
+        clearTimeout(timeoutId);
+        if (scheduledTasksHasData) {
+          setScheduledStatusBanner("stale", "刷新失败，当前显示的是最近一次成功获取的数据");
+        } else {
+          setScheduledStatusBanner("error", "无法加载定时任务数据，请稍后重试");
+        }
+      });
+  }
+
+  var scheduledRetryBtn = document.getElementById("scheduled-status-retry-btn");
+  if (scheduledRetryBtn) {
+    scheduledRetryBtn.addEventListener("click", function () { fetchScheduledTasks(); });
   }
 
   // ---- 启动 ----
