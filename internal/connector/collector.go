@@ -110,6 +110,10 @@ type Snapshot struct {
 	Runs         []TaskRun        `json:"runs"`
 	Sessions     []SessionSummary `json:"sessions"`
 	Capabilities Capabilities     `json:"capabilities"`
+	// ScheduledTasks is the sanitized, read-only view of Hermes cron jobs,
+	// launchd jobs, crontab entries and at-queue jobs on this machine. See
+	// ScheduledTask for the strict 9-field allowlist.
+	ScheduledTasks []ScheduledTask `json:"scheduled_tasks"`
 }
 
 type Capabilities struct {
@@ -223,7 +227,28 @@ func (c *SQLiteCollector) Snapshot(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
-	return Snapshot{TakenAt: time.Now().UTC(), Tasks: tasks, Runs: runs, Sessions: sessions}, nil
+	scheduledTasks, err := c.collectScheduledTasks(ctx)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("collect scheduled tasks: %w", err)
+	}
+
+	return Snapshot{TakenAt: time.Now().UTC(), Tasks: tasks, Runs: runs, Sessions: sessions, ScheduledTasks: scheduledTasks}, nil
+}
+
+// collectScheduledTasks aggregates Hermes cron, launchd, crontab and at
+// sources. The Hermes cron directory is derived from StateDBPath's parent
+// directory (cron/jobs.json lives alongside state.db); when StateDBPath is
+// unset, Hermes cron collection is skipped but launchd/crontab/at still run
+// on darwin.
+func (c *SQLiteCollector) collectScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
+	cfg := ScheduledTasksConfig{
+		LaunchdDirs: DefaultLaunchdDirs(),
+		Runner:      ExecCommandRunner{},
+	}
+	if strings.TrimSpace(c.StateDBPath) != "" {
+		cfg.HermesCronDir = filepath.Join(filepath.Dir(c.StateDBPath), "cron")
+	}
+	return CollectScheduledTasks(ctx, cfg)
 }
 
 // collectSessions returns sanitized session metadata from StateDBPath, or an
